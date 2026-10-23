@@ -40,6 +40,14 @@ data class BattleHudState(
     val opponentUltPercent: Int = 0,
     val isPlayerUltActive: Boolean = false,
     val isOpponentUltActive: Boolean = false,
+    val playerUltActiveHalfSecs: Int = 0,
+    val opponentUltActiveHalfSecs: Int = 0,
+    val playerUltCooldownHalfSecs: Int = 0,
+    val opponentUltCooldownHalfSecs: Int = 0,
+    val playerUltMaxDurationSec: Float = 5f,
+    val opponentUltMaxDurationSec: Float = 5f,
+    val playerUltMaxCooldownSec: Float = 8f,
+    val opponentUltMaxCooldownSec: Float = 8f,
     val redirectReady: Boolean = true,
     val redirectHalfSecsLeft: Int = 0,
     val lastImpactBanner: String = ""
@@ -78,10 +86,10 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     private val _matchmakingCountdown = MutableStateFlow(2)
     val matchmakingCountdown: StateFlow<Int> = _matchmakingCountdown.asStateFlow()
 
-    private val _opponentName = MutableStateFlow("Rival Kamado")
+    private val _opponentName = MutableStateFlow("Rival Sukuna")
     val opponentName: StateFlow<String> = _opponentName.asStateFlow()
 
-    private val _opponentCharacter = MutableStateFlow(CharacterRoster.getById("kamado_sun"))
+    private val _opponentCharacter = MutableStateFlow(CharacterRoster.getById("sukuna_shrine"))
     val opponentCharacter: StateFlow<CharacterData> = _opponentCharacter.asStateFlow()
 
     private val _battleSim = MutableStateFlow<BattleSimulation?>(null)
@@ -232,14 +240,15 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         _botDifficulty.value = difficulty
         _currentScreen.value = AppScreen.MATCHMAKING
 
-        val playerCharId = _playerProfile.value.selectedCharacterId
-        val oppChar = CharacterRoster.characters.filter { it.id != playerCharId }.random()
+        val playerChar = CharacterRoster.getById(_playerProfile.value.selectedCharacterId)
+        val candidates = CharacterRoster.characters.filter { it.id != playerChar.id }
+        val oppChar = candidates.random()
         _opponentCharacter.value = oppChar
 
         _opponentName.value = when (mode) {
             GameMode.PRACTICE_BOT -> "${difficulty.shortLabel} ${oppChar.name}"
-            GameMode.ONLINE_MATCH -> listOf("KuroBlade", "RaidenZero", "SoraVortex", "Akira_JP", "ZenithStrike").random()
-            GameMode.FRIENDS_LOBBY -> "Arena Rival"
+            GameMode.ONLINE_MATCH -> listOf("KuroBlade", "RaidenZero", "SoraVortex", "Akira_JP", "AbyssWalker", "ZenithStrike").random()
+            GameMode.FRIENDS_LOBBY -> "Rival ${oppChar.name}"
         }
 
         matchmakingJob?.cancel()
@@ -306,6 +315,14 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
                 _turnState.value = TurnState.KNOCKOUT_SLOWMO
                 triggerHaptic(140L)
                 handleMatchEnd(isPlayerWinner)
+            },
+            onUltimateActivated = { isPlayer, ultName ->
+                triggerHaptic(80L)
+                latestBannerText = if (isPlayer) {
+                    "YOU AWAKENED • $ultName!"
+                } else {
+                    "AI AWAKENED • $ultName!"
+                }
             }
         )
 
@@ -314,9 +331,6 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         syncHudState(sim, force = true)
     }
 
-    /**
-     * Advances simulation at VSYNC rate without causing root UI recompositions.
-     */
     fun stepBattleFrame(dt: Float) {
         val sim = _battleSim.value ?: return
         if (!sim.isArenaInitialized) return
@@ -330,9 +344,6 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         syncHudState(sim, force = false)
     }
 
-    /**
-     * Handles both the initial match-opening launch AND mid-flight tactical redirects.
-     */
     fun onPlayerLaunch(dragVector: Vector2, maxPullPx: Float) {
         val sim = _battleSim.value ?: return
         if (!sim.isRoundActive) return
@@ -371,10 +382,8 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     fun onPlayerTriggerUltimate() {
         val sim = _battleSim.value ?: return
         if (!sim.isRoundActive) return
-        if (sim.playerBall.ultimateGauge >= 100f && !sim.playerBall.isUltimateActive) {
-            sim.triggerUltimate(sim.playerBall)
+        if (sim.triggerUltimate(sim.playerBall)) {
             ultimatesUsedInMatch++
-            triggerHaptic(80L)
             syncHudState(sim, force = true)
         }
     }
@@ -383,7 +392,14 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         val p = sim.playerBall
         val o = sim.opponentBall
         val pUltInt = if (p.ultimateGauge >= 100f) 100 else ((p.ultimateGauge.toInt() / 2) * 2)
-        val oUltInt = if (o.ultimateGauge >= 100f) 100 else ((o.ultimateGauge.toInt() / 5) * 5)
+        val oUltInt = if (o.ultimateGauge >= 100f) 100 else ((o.ultimateGauge.toInt() / 2) * 2)
+
+        val pActiveHalf = if (p.isUltimateActive) (p.ultimateTimeRemaining * 2f + 0.9f).toInt().coerceAtLeast(1) else 0
+        val oActiveHalf = if (o.isUltimateActive) (o.ultimateTimeRemaining * 2f + 0.9f).toInt().coerceAtLeast(1) else 0
+
+        val pCdHalf = if (p.isUltimateOnCooldown) (p.ultimateCooldownRemaining * 2f + 0.9f).toInt().coerceAtLeast(1) else 0
+        val oCdHalf = if (o.isUltimateOnCooldown) (o.ultimateCooldownRemaining * 2f + 0.9f).toInt().coerceAtLeast(1) else 0
+
         val redirectHalfSecs = (sim.playerRedirectCooldown * 2f + 0.9f).toInt().coerceAtLeast(0)
 
         val candidate = BattleHudState(
@@ -393,6 +409,14 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
             opponentUltPercent = oUltInt,
             isPlayerUltActive = p.isUltimateActive,
             isOpponentUltActive = o.isUltimateActive,
+            playerUltActiveHalfSecs = pActiveHalf,
+            opponentUltActiveHalfSecs = oActiveHalf,
+            playerUltCooldownHalfSecs = pCdHalf,
+            opponentUltCooldownHalfSecs = oCdHalf,
+            playerUltMaxDurationSec = p.character.ultimateDurationSeconds,
+            opponentUltMaxDurationSec = o.character.ultimateDurationSeconds,
+            playerUltMaxCooldownSec = p.character.ultimateCooldownSeconds,
+            opponentUltMaxCooldownSec = o.character.ultimateCooldownSeconds,
             redirectReady = sim.playerRedirectCooldown <= 0.05f,
             redirectHalfSecsLeft = redirectHalfSecs,
             lastImpactBanner = latestBannerText

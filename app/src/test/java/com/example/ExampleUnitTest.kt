@@ -1,8 +1,10 @@
 package com.example
 
+import com.example.model.AnimeTier
 import com.example.model.AppThemeMode
 import com.example.model.BattleSimulation
 import com.example.model.BotDifficulty
+import com.example.model.CharacterAlignment
 import com.example.model.CharacterRoster
 import com.example.model.CombatBall
 import com.example.model.EngineSettings
@@ -58,20 +60,102 @@ class ExampleUnitTest {
     }
 
     @Test
-    fun testTwentyAnimeCharacterRosterIntegrity() {
+    fun testExpandedRosterCoversPopularToNicheAndProtagonistAntagonist() {
         val roster = CharacterRoster.characters
-        assertEquals(20, roster.size)
-        assertEquals(20, roster.map { it.id }.toSet().size)
+        assertEquals(48, roster.size)
+        assertEquals(48, roster.map { it.id }.toSet().size)
         assertEquals(4, CharacterRoster.starterIds.size)
 
-        val kakarot = CharacterRoster.getById("kakarot_z")
-        assertNotNull(kakarot)
-        assertEquals(100, kakarot.maxHp)
-        assertTrue(kakarot.isStarter)
+        val protagonists = roster.filter { it.alignment == CharacterAlignment.PROTAGONIST }
+        val antagonists = roster.filter { it.alignment == CharacterAlignment.ANTAGONIST }
+        assertTrue("Must have >= 25 protagonists", protagonists.size >= 25)
+        assertTrue("Must have >= 15 antagonists", antagonists.size >= 15)
 
-        val jinwoo = CharacterRoster.getById("jinwoo_monarch")
-        assertNotNull(jinwoo)
-        assertTrue(jinwoo.unlockCostGold > 0)
+        assertTrue(roster.any { it.popularityTier == AnimeTier.POPULAR })
+        assertTrue(roster.any { it.popularityTier == AnimeTier.CULT })
+        assertTrue(roster.any { it.popularityTier == AnimeTier.NICHE })
+
+        val bondrewd = CharacterRoster.getById("bondrewd_dawn")
+        assertNotNull(bondrewd)
+        assertEquals(CharacterAlignment.ANTAGONIST, bondrewd.alignment)
+        assertEquals(AnimeTier.NICHE, bondrewd.popularityTier)
+    }
+
+    @Test
+    fun testSymmetricAiAndPlayerUltimateProgressAndCooldown() {
+        val pBall = CombatBall(
+            id = "player",
+            name = "Player",
+            position = Vector2(500f, 1200f),
+            velocity = Vector2.Zero,
+            character = CharacterRoster.getById("kakarot_z")
+        )
+        val oBall = CombatBall(
+            id = "opponent",
+            name = "AI Rival",
+            position = Vector2(500f, 300f),
+            velocity = Vector2.Zero,
+            character = CharacterRoster.getById("frieza_emperor")
+        )
+
+        var aiUltFired = false
+        var playerUltFired = false
+
+        val sim = BattleSimulation(
+            playerBall = pBall,
+            opponentBall = oBall,
+            engineSettings = EngineSettings(),
+            onCollisionImpact = { _, _, _, _ -> },
+            onWallBounce = {},
+            onKnockout = {},
+            onUltimateActivated = { isPlayer, _ ->
+                if (isPlayer) playerUltFired = true else aiUltFired = true
+            }
+        )
+        sim.configureArenaBounds(1000f, 1600f)
+        sim.startNonstopClash(Vector2(0.45f, -0.89f), BotDifficulty.HARD)
+
+        // Charge both spheres to 100%
+        pBall.ultimateGauge = 100f
+        oBall.ultimateGauge = 100f
+        assertTrue(pBall.canActivateUltimate)
+        assertTrue(oBall.canActivateUltimate)
+
+        // Player triggers ultimate manually
+        assertTrue(sim.triggerUltimate(pBall))
+        assertTrue(playerUltFired)
+        assertTrue(pBall.isUltimateActive)
+
+        // Step AI tactical loop past HARD reaction delay (0.14s) so AI activates Ultimate automatically
+        repeat(15) {
+            sim.update(0.02f)
+            sim.performAiTacticalStep(0.02f, BotDifficulty.HARD)
+        }
+        assertTrue("AI should activate its Ultimate once 100% charged", aiUltFired)
+        assertTrue(oBall.isUltimateActive)
+
+        // Prevent KO while testing full Ultimate expiration -> Cooldown transition
+        for (step in 0 until 320) {
+            pBall.currentHp = 100f
+            oBall.currentHp = 100f
+            sim.update(0.02f)
+        }
+
+        // Both ultimates must have finished and entered mandatory Cooldown!
+        assertFalse(pBall.isUltimateActive)
+        assertFalse(oBall.isUltimateActive)
+        assertTrue("Player must enter Ultimate cooldown after duration", pBall.isUltimateOnCooldown)
+        assertTrue("AI must enter Ultimate cooldown after duration", oBall.isUltimateOnCooldown)
+        assertEquals(0f, pBall.ultimateGauge, 0.01f)
+        assertEquals(0f, oBall.ultimateGauge, 0.01f)
+
+        // Cannot charge or re-activate while on cooldown
+        pBall.addUltimate(50f)
+        oBall.addUltimate(50f)
+        assertEquals(0f, pBall.ultimateGauge, 0.01f)
+        assertEquals(0f, oBall.ultimateGauge, 0.01f)
+        assertFalse(sim.triggerUltimate(pBall))
+        assertFalse(sim.triggerUltimate(oBall))
     }
 
     @Test
@@ -105,8 +189,6 @@ class ExampleUnitTest {
         )
 
         sim.configureArenaBounds(1000f, 1600f)
-
-        // Launch opening shot -> BOTH balls must ricochet nonstop without ever halting until 0 HP!
         sim.startNonstopClash(Vector2(0.55f, -0.83f), BotDifficulty.MEDIUM)
 
         var stepsRun = 0

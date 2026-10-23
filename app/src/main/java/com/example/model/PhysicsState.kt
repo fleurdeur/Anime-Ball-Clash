@@ -70,14 +70,19 @@ data class CombatBall(
     var ultimateGauge: Float = 0f,
     var isUltimateActive: Boolean = false,
     var ultimateTimeRemaining: Float = 0f,
+    var ultimateCooldownRemaining: Float = 0f,
+    var aiUltReactionTimer: Float = 0f,
     var bleedTicksRemaining: Int = 0,
     var bleedTimer: Float = 0f,
     var stunTimeRemaining: Float = 0f,
+    var slowTimer: Float = 0f,
     var resumeDirection: Vector2 = Vector2(0f, -1f),
     var speedBoostTimer: Float = 0f,
     var speedBoostMultiplier: Float = 1.0f,
     var kamuiBounceStacks: Int = 0,
     var jinwooSpeedStacks: Int = 0,
+    var meruemDamageStacks: Int = 0,
+    var totalWallBounces: Int = 0,
     var isShieldActive: Boolean = false,
     var isSeriousActive: Boolean = false,
     var wallBounceCombo: Int = 0,
@@ -85,12 +90,19 @@ data class CombatBall(
 ) {
     val isDead: Boolean get() = currentHp <= 0f
     val isStunned: Boolean get() = stunTimeRemaining > 0f
+    val isUltimateOnCooldown: Boolean get() = ultimateCooldownRemaining > 0f
+    val canActivateUltimate: Boolean
+        get() = !isUltimateActive && ultimateCooldownRemaining <= 0f && ultimateGauge >= 100f
 
     fun addUltimate(amount: Float) {
-        if (!isUltimateActive) {
-            val gainMult = if (character.id == "frieren_zoltraak") 1.30f else 1.0f
-            ultimateGauge = (ultimateGauge + amount * gainMult).coerceIn(0f, 100f)
+        if (isUltimateActive || ultimateCooldownRemaining > 0f) return
+        val gainMult = when (character.id) {
+            "frieren_zoltraak" -> 1.30f
+            "rimuru_tempest" -> 1.15f
+            "simon_spiral" -> if (currentHp < 60f) 1.25f else 1.05f
+            else -> 1.0f
         }
+        ultimateGauge = (ultimateGauge + amount * gainMult).coerceIn(0f, 100f)
     }
 }
 

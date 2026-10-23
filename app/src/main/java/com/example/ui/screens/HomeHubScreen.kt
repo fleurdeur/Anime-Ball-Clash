@@ -284,16 +284,33 @@ fun HomeHubScreen(
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Surface(
-                                        color = Color(0xFF232A3B),
-                                        shape = RoundedCornerShape(8.dp)
+                                    Row(
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                        verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        Text(
-                                            text = "${activeCharacter.classType.displayName} • ${activeCharacter.element.displayName}",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = Color(0xFFD6DEEE),
-                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
-                                        )
+                                        val isVillain = activeCharacter.alignment == com.example.model.CharacterAlignment.ANTAGONIST
+                                        Surface(
+                                            color = if (isVillain) Color(0xFF3D1924) else Color(0xFF172D44),
+                                            shape = RoundedCornerShape(8.dp)
+                                        ) {
+                                            Text(
+                                                text = activeCharacter.alignment.badgeLabel,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = if (isVillain) Color(0xFFFF8A9B) else Color(0xFF7CC4FA),
+                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                            )
+                                        }
+                                        Surface(
+                                            color = Color(0xFF232A3B),
+                                            shape = RoundedCornerShape(8.dp)
+                                        ) {
+                                            Text(
+                                                text = "${activeCharacter.classType.displayName} • ${activeCharacter.popularityTier.displayName}",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = Color(0xFFD6DEEE),
+                                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                                            )
+                                        }
                                     }
 
                                     Surface(
@@ -377,14 +394,15 @@ fun HomeHubScreen(
 
                         Spacer(modifier = Modifier.height(12.dp))
 
-                        // Crisp 3-column tactical stat chips
+                        // Crisp 4-column tactical stat chips
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            StatPillCard("DAMAGE", "${activeCharacter.baseDamage}", Modifier.weight(1f))
+                            StatPillCard("DMG", "${activeCharacter.baseDamage}", Modifier.weight(1f))
                             StatPillCard("SPEED", "${String.format("%.2fx", activeCharacter.speedRating)}", Modifier.weight(1f))
                             StatPillCard("MASS", "${String.format("%.2f", activeCharacter.massRating)}", Modifier.weight(1f))
+                            StatPillCard("ULT CD", "${activeCharacter.ultimateCooldownSeconds.toInt()}s", Modifier.weight(1f))
                         }
 
                         Spacer(modifier = Modifier.height(12.dp))

@@ -44,6 +44,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.model.AppScreen
+import com.example.model.CharacterAlignment
 import com.example.model.CharacterData
 import com.example.model.CharacterRoster
 import com.example.model.PlayerProfile
@@ -111,7 +112,7 @@ fun ShopScreen(
                             color = palette.textPrimary
                         )
                         Text(
-                            text = "Earn Gold in clashes & missions to recruit legends",
+                            text = "Recruit ${sortedRecruits.size} popular, cult & niche heroes and villains",
                             style = MaterialTheme.typography.bodyMedium,
                             color = palette.textSecondary
                         )
@@ -155,6 +156,7 @@ fun ShopScreen(
                     items(items = sortedRecruits, key = { it.id }) { character ->
                         val isUnlocked = unlockedIds.contains(character.id)
                         val canAfford = profile.gold >= character.unlockCostGold
+                        val isVillain = character.alignment == CharacterAlignment.ANTAGONIST
 
                         Surface(
                             shape = RoundedCornerShape(18.dp),
@@ -195,9 +197,11 @@ fun ShopScreen(
                                         overflow = TextOverflow.Ellipsis
                                     )
                                     Text(
-                                        text = "${character.animeInspiration} • ${character.classType.displayName}",
+                                        text = "${character.alignment.badgeLabel} • ${character.animeInspiration} • ${character.popularityTier.displayName}",
                                         style = MaterialTheme.typography.labelSmall,
-                                        color = palette.blueAccent
+                                        color = if (isVillain) palette.primaryAccent else palette.blueAccent,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
                                     )
                                     Spacer(modifier = Modifier.height(4.dp))
                                     Text(

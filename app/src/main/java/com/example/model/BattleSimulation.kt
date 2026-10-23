@@ -18,7 +18,8 @@ class BattleSimulation(
     var engineSettings: EngineSettings,
     val onCollisionImpact: (isPlayerAttacker: Boolean, damage: Int, isCrit: Boolean, passiveLabel: String) -> Unit,
     val onWallBounce: (ball: CombatBall) -> Unit,
-    val onKnockout: (isPlayerWinner: Boolean) -> Unit
+    val onKnockout: (isPlayerWinner: Boolean) -> Unit,
+    val onUltimateActivated: (isPlayer: Boolean, ultimateName: String) -> Unit = { _, _ -> }
 ) {
     val particles = ArrayList<Particle>(64)
     val shockwaves = ArrayList<ShockwaveRing>(12)
@@ -46,7 +47,8 @@ class BattleSimulation(
     var wallFlashBottom: Float = 0f
 
     private var collisionCooldown: Float = 0f
-    private var kamadoTrailCooldown: Float = 0f
+    private var playerTrailCooldown: Float = 0f
+    private var aiTrailCooldown: Float = 0f
 
     val wallPadding: Float get() = max(16f, min(arenaWidth, arenaHeight) * 0.026f)
     val wallLeft: Float get() = wallPadding + playerBall.radius
@@ -74,8 +76,6 @@ class BattleSimulation(
             opponentBall.velocity = Vector2.Zero
             playerBall.resumeDirection = Vector2(0.35f, -0.93f).normalized()
             opponentBall.resumeDirection = Vector2(-0.35f, 0.93f).normalized()
-            initVerletHair(playerBall)
-            initVerletHair(opponentBall)
         } else {
             playerBall.position = Vector2(
                 playerBall.position.x.coerceIn(wallLeft, wallRight),
@@ -88,22 +88,13 @@ class BattleSimulation(
         }
     }
 
-    private fun initVerletHair(ball: CombatBall) {
-        val seg = ball.radius * 0.32f
-        ball.hairNodes = List(4) { i ->
-            VerletHairNode(
-                x = ball.position.x,
-                y = ball.position.y - i * seg,
-                oldX = ball.position.x,
-                oldY = ball.position.y - i * seg
-            )
-        }
-    }
-
     fun computeTargetCruiseSpeed(ball: CombatBall, difficultySpeedMod: Float = 1f): Float {
         var mult = ball.character.speedRating * difficultySpeedMod
         if (ball.speedBoostTimer > 0f) {
             mult *= ball.speedBoostMultiplier
+        }
+        if (ball.slowTimer > 0f) {
+            mult *= 0.85f
         }
         if (ball.jinwooSpeedStacks > 0) {
             mult *= (1f + ball.jinwooSpeedStacks * 0.03f)
@@ -112,12 +103,16 @@ class BattleSimulation(
             when (ball.character.id) {
                 "kakarot_z" -> mult *= 1.30f
                 "chainsaw_devil" -> mult *= 1.28f
-                "kurosaki_hollow" -> mult *= 1.35f
-                "killua_godspeed" -> mult *= 1.40f
+                "kurosaki_hollow", "ryuko_scissor" -> mult *= 1.35f
+                "killua_godspeed", "okarun_turbo" -> mult *= 1.40f
+                "midoriya_ofa", "accelerator_vector" -> mult *= 1.36f
+                "frieza_emperor", "phosphophyllite_gem" -> mult *= 1.32f
+                "meruem_chimera", "vash_stampede", "hyakkimaru_dororo" -> mult *= 1.34f
+                "guts_berserk", "gabimaru_hollow" -> mult *= 1.30f
                 "raikiri_shinobi" -> mult *= (1f + min(6, ball.kamuiBounceStacks) * 0.08f)
             }
         }
-        return baseArenaSpeed * mult.coerceIn(0.85f, 2.25f)
+        return baseArenaSpeed * mult.coerceIn(0.80f, 2.30f)
     }
 
     /**
@@ -139,9 +134,6 @@ class BattleSimulation(
         applyImpulseLaunch(opponentBall, aiDir, difficulty.speedFactor)
     }
 
-    /**
-     * Direct launch helper (also activates nonstop mode for individual ball tests).
-     */
     fun launchPlayer(direction: Vector2, powerRatio: Float = 1.0f) {
         val dir = sanitizeLaunchAngle(direction.normalized())
         if (dir.length() < 0.01f) return
@@ -156,9 +148,6 @@ class BattleSimulation(
         applyImpulseLaunch(opponentBall, dir, powerRatio.coerceIn(0.75f, 1.25f))
     }
 
-    /**
-     * Mid-flight tactical redirect for Player or AI without ever stopping the ball.
-     */
     fun redirectPlayerBall(direction: Vector2): Boolean {
         if (!isClashStarted || !isRoundActive || playerRedirectCooldown > 0f || playerBall.isStunned) {
             return false
@@ -174,12 +163,27 @@ class BattleSimulation(
         return true
     }
 
+    /**
+     * AI tactical step: manages BOTH AI mid-flight curve redirects AND AI Ultimate activation
+     * using the exact same Ultimate progress bar & cooldown rules as the Player!
+     */
     fun performAiTacticalStep(dt: Float, difficulty: BotDifficulty) {
         if (!isClashStarted || !isRoundActive) return
 
-        // AI triggers Ultimate automatically as soon as gauge hits 100%
-        if (opponentBall.ultimateGauge >= 100f && !opponentBall.isUltimateActive && !opponentBall.isStunned) {
-            triggerUltimate(opponentBall)
+        // Symmetric AI Ultimate activation (respects gauge == 100%, not active, not on cooldown, not stunned)
+        if (opponentBall.canActivateUltimate && !opponentBall.isStunned) {
+            opponentBall.aiUltReactionTimer += dt
+            val reactionDelay = when (difficulty) {
+                BotDifficulty.EASY -> 0.85f
+                BotDifficulty.MEDIUM -> 0.38f
+                BotDifficulty.HARD -> 0.14f
+            }
+            if (opponentBall.aiUltReactionTimer >= reactionDelay) {
+                opponentBall.aiUltReactionTimer = 0f
+                triggerUltimate(opponentBall)
+            }
+        } else {
+            opponentBall.aiUltReactionTimer = 0f
         }
 
         aiRedirectCooldown = max(0f, aiRedirectCooldown - dt)
@@ -219,8 +223,8 @@ class BattleSimulation(
         val targetSpeed = computeTargetCruiseSpeed(ball, speedScale)
         ball.resumeDirection = dir
         ball.velocity = dir * targetSpeed
-        ball.stretchFactor = 1.24f
-        ball.squashFactor = 0.80f
+        ball.stretchFactor = 1.20f
+        ball.squashFactor = 0.84f
         ball.deformAngle = atan2(dir.y, dir.x)
         ball.weaponSpinBurst = 12f
         spawnShockwave(ball.position.x, ball.position.y, ball.character.auraColor, ball.radius * 1.9f)
@@ -231,68 +235,104 @@ class BattleSimulation(
         if (dir.length() < 0.001f) return Vector2(0.5f, -0.866f)
         var vx = dir.x
         var vy = dir.y
-        // Prevent dead-flat horizontal or vertical paths so spheres continually cross the court
         if (abs(vx) < 0.22f) vx = if (vx >= 0f) 0.24f else -0.24f
         if (abs(vy) < 0.22f) vy = if (vy >= 0f) 0.24f else -0.24f
         return Vector2(vx, vy).normalized()
     }
 
-    fun triggerUltimate(ball: CombatBall) {
-        if (ball.ultimateGauge < 100f || ball.isUltimateActive) return
+    /**
+     * Triggers Ultimate for either Player or AI when gauge is 100% and cooldown is 0.
+     * Once Ultimate finishes, `ultimateCooldownRemaining` automatically begins!
+     */
+    fun triggerUltimate(ball: CombatBall): Boolean {
+        if (!ball.canActivateUltimate) return false
         ball.ultimateGauge = 0f
         ball.isUltimateActive = true
         ball.ultimateTimeRemaining = ball.character.ultimateDurationSeconds
         ball.kamuiBounceStacks = 0
         ball.weaponSpinBurst = 20f
 
-        val rival = if (ball === playerBall) opponentBall else playerBall
+        val isPlayer = ball === playerBall
+        val rival = if (isPlayer) opponentBall else playerBall
+        val prefix = if (isPlayer) "" else "AI "
 
         when (ball.character.id) {
             "satoru_void" -> {
                 if (rival.velocity.length() > 1f) rival.resumeDirection = rival.velocity.normalized()
                 rival.velocity = Vector2.Zero
                 rival.stunTimeRemaining = 1.5f
-                spawnFloatingText("UNLIMITED VOID!", rival.position.x, rival.position.y - rival.radius * 1.25f, Color(0xFF818CF8), isCrit = true)
+                spawnFloatingText("${prefix}UNLIMITED VOID!", rival.position.x, rival.position.y - rival.radius * 1.25f, Color(0xFF818CF8), isCrit = true)
             }
-            "kujo_star" -> {
+            "kujo_star", "dio_world" -> {
                 if (rival.velocity.length() > 1f) rival.resumeDirection = rival.velocity.normalized()
                 rival.velocity = Vector2.Zero
                 rival.stunTimeRemaining = 1.6f
-                spawnFloatingText("THE WORLD • TIME STOP!", rival.position.x, rival.position.y - rival.radius * 1.25f, Color(0xFFC084FC), isCrit = true)
+                val callout = if (ball.character.id == "dio_world") "${prefix}ZA WARUDO!" else "${prefix}TIME STOP!"
+                spawnFloatingText(callout, rival.position.x, rival.position.y - rival.radius * 1.25f, Color(0xFFFACC15), isCrit = true)
             }
             "caped_baldy" -> {
                 ball.isSeriousActive = true
-                spawnFloatingText("SERIOUS PUNCH ARMED!", ball.position.x, ball.position.y - ball.radius * 1.25f, Color(0xFFFACC15), isCrit = true)
+                spawnFloatingText("${prefix}SERIOUS PUNCH ARMED!", ball.position.x, ball.position.y - ball.radius * 1.25f, Color(0xFFFACC15), isCrit = true)
             }
-            "yeager_titan" -> {
+            "yeager_titan", "makima_control", "blackbeard_tremor", "madara_uchiha", "ainz_overlord", "gilgamesh_babylon", "tetsuo_psychic", "aizen_kyoka" -> {
+                val burstDmg = when (ball.character.id) {
+                    "aizen_kyoka" -> 10f
+                    "yeager_titan", "blackbeard_tremor", "gilgamesh_babylon", "tetsuo_psychic" -> 12f
+                    else -> 13f
+                }
                 val delta = rival.position - ball.position
                 val dist = delta.length().coerceAtLeast(1f)
-                rival.currentHp = max(0f, rival.currentHp - 12f)
-                rival.hitFlashTimer = 0.8f
+                rival.currentHp = max(0f, rival.currentHp - burstDmg)
+                rival.hitFlashTimer = 0.85f
                 val pushDir = sanitizeLaunchAngle(delta / dist)
                 rival.resumeDirection = pushDir
                 if (!rival.isStunned) {
                     rival.velocity = pushDir * (computeTargetCruiseSpeed(rival) * 1.25f)
                 }
-                spawnFloatingText("-12 COLOSSUS STEAM!", rival.position.x, rival.position.y - rival.radius, Color(0xFFFB923C), isCrit = true)
+                if (ball.character.id == "madara_uchiha") {
+                    spawnFireHazard(ball.id, rival.position.x, rival.position.y, rival.radius, 4.0f)
+                }
+                spawnFloatingText("-${burstDmg.toInt()} ${ball.character.ultimateName.uppercase()}!", rival.position.x, rival.position.y - rival.radius, ball.character.auraColor, isCrit = true)
             }
-            "elric_fullmetal" -> {
-                ball.currentHp = min(ball.maxHp, ball.currentHp + 12f)
-                spawnFloatingText("+12 ALCHEMY REPAIR!", ball.position.x, ball.position.y - ball.radius * 1.25f, Color(0xFFFBBF24), isCrit = true)
+            "griffith_femto" -> {
+                rival.currentHp = max(0f, rival.currentHp - 11f)
+                rival.hitFlashTimer = 0.8f
+                if (rival.velocity.length() > 1f) rival.resumeDirection = rival.velocity.normalized()
+                rival.stunTimeRemaining = 0.8f
+                spawnFloatingText("-11 ECLIPSE CRUSH!", rival.position.x, rival.position.y - rival.radius, Color(0xFF818CF8), isCrit = true)
+            }
+            "elric_fullmetal", "phosphophyllite_gem", "caiman_dorohedoro" -> {
+                val healAmt = when (ball.character.id) {
+                    "caiman_dorohedoro" -> 14f
+                    "elric_fullmetal" -> 12f
+                    else -> 10f
+                }
+                ball.currentHp = min(ball.maxHp, ball.currentHp + healAmt)
+                spawnFloatingText("+${healAmt.toInt()} HP ${ball.character.ultimateName.uppercase()}!", ball.position.x, ball.position.y - ball.radius * 1.25f, Color(0xFF4ADE80), isCrit = true)
+            }
+            "rimuru_tempest" -> {
+                rival.ultimateGauge = max(0f, rival.ultimateGauge - 18f)
+                spawnFloatingText("${prefix}BEELZEBUTH DEVOUR!", ball.position.x, ball.position.y - ball.radius * 1.25f, Color(0xFF38BDF8), isCrit = true)
+            }
+            "shigaraki_decay", "en_dorohedoro" -> {
+                spawnFireHazard(ball.id, ball.position.x, ball.position.y, ball.radius * 1.15f, 4.4f)
+                spawnFireHazard(ball.id, rival.position.x, rival.position.y, rival.radius * 0.95f, 4.0f)
+                spawnFloatingText("${prefix}${ball.character.ultimateName.uppercase()}!", ball.position.x, ball.position.y - ball.radius * 1.25f, ball.character.auraColor, isCrit = true)
             }
             "asta_grimoire" -> {
                 if (rival.isUltimateActive) {
                     rival.isUltimateActive = false
                     rival.ultimateTimeRemaining = 0f
                     rival.isSeriousActive = false
+                    rival.ultimateCooldownRemaining = rival.character.ultimateCooldownSeconds * 0.75f
                     spawnFloatingText("ULTIMATE NULLIFIED!", rival.position.x, rival.position.y - rival.radius * 1.3f, Color(0xFFEF4444), isCrit = true)
                 } else {
-                    spawnFloatingText("BLACK DIVIDER!", ball.position.x, ball.position.y - ball.radius * 1.25f, Color(0xFFEF4444), isCrit = true)
+                    spawnFloatingText("${prefix}BLACK DIVIDER!", ball.position.x, ball.position.y - ball.radius * 1.25f, Color(0xFFEF4444), isCrit = true)
                 }
             }
             else -> {
                 spawnFloatingText(
-                    "${ball.character.ultimateName.uppercase()}!",
+                    "$prefix${ball.character.ultimateName.uppercase()}!",
                     ball.position.x,
                     ball.position.y - ball.radius * 1.25f,
                     ball.character.auraColor,
@@ -304,6 +344,9 @@ class BattleSimulation(
         spawnShockwave(ball.position.x, ball.position.y, ball.character.auraColor, ball.radius * 3.8f)
         spawnImpactBurst(ball.position.x, ball.position.y, ball.character.auraColor, engineSettings.renderMode.particleCountOnHit)
         screenShakeAmount = 18f
+        onUltimateActivated(isPlayer, ball.character.ultimateName)
+        checkKnockoutState()
+        return true
     }
 
     fun update(rawDt: Float) {
@@ -316,7 +359,8 @@ class BattleSimulation(
         wallFlashTop = max(0f, wallFlashTop - rawDt * 3.8f)
         wallFlashBottom = max(0f, wallFlashBottom - rawDt * 3.8f)
         collisionCooldown = max(0f, collisionCooldown - dt)
-        kamadoTrailCooldown = max(0f, kamadoTrailCooldown - dt)
+        playerTrailCooldown = max(0f, playerTrailCooldown - dt)
+        aiTrailCooldown = max(0f, aiTrailCooldown - dt)
         playerRedirectCooldown = max(0f, playerRedirectCooldown - rawDt)
 
         playerBall.delayedHp += (playerBall.currentHp - playerBall.delayedHp) * min(1f, rawDt * 5.5f)
@@ -330,13 +374,12 @@ class BattleSimulation(
         }
 
         if (isClashStarted) {
-            updateUltimate(playerBall, dt)
-            updateUltimate(opponentBall, dt)
+            updateUltimate(playerBall, dt, isPlayer = true)
+            updateUltimate(opponentBall, dt, isPlayer = false)
             updateStatusEffects(playerBall, dt)
             updateStatusEffects(opponentBall, dt)
             updateHazards(dt)
 
-            // 4 sub-steps for crisp tunnel-free high-velocity ricochets
             val subSteps = 4
             val subDt = dt / subSteps
             for (step in 0 until subSteps) {
@@ -374,11 +417,6 @@ class BattleSimulation(
         }
     }
 
-    /**
-     * Perpetual Nonstop Ricochet Integrator:
-     * Zero air friction. Continuously maintains each sphere's kinetic cruise velocity so
-     * neither ball can ever decelerate or stall until one reaches 0 HP.
-     */
     private fun stepNonstopMovement(ball: CombatBall, subDt: Float) {
         if (ball.isStunned) {
             ball.velocity = Vector2.Zero
@@ -389,12 +427,10 @@ class BattleSimulation(
         val currentSpeed = ball.velocity.length()
 
         if (currentSpeed < 12f) {
-            // Immediately resume along stored direction if recovering from stun or zero-vel collision
             val resume = sanitizeLaunchAngle(ball.resumeDirection)
             ball.velocity = resume * targetSpeed
         } else {
             ball.resumeDirection = ball.velocity / currentSpeed
-            // Smoothly converge speed back to targetSpeed (keeps knockback surges lively while preventing any slowdown!)
             val regulatedSpeed = when {
                 currentSpeed < targetSpeed -> targetSpeed
                 currentSpeed > targetSpeed * 1.45f -> targetSpeed * 1.45f
@@ -406,7 +442,13 @@ class BattleSimulation(
         ball.position = ball.position + (ball.velocity * subDt)
     }
 
-    private fun updateUltimate(ball: CombatBall, dt: Float) {
+    /**
+     * Symmetric Ultimate state machine for BOTH Player and AI:
+     * 1. Active Awakening -> drains `ultimateTimeRemaining`, then enters `ultimateCooldownRemaining`.
+     * 2. Cooldown -> drains `ultimateCooldownRemaining` (gauge locked at 0%).
+     * 3. Charging -> builds `ultimateGauge` from 0% to 100%.
+     */
+    private fun updateUltimate(ball: CombatBall, dt: Float, isPlayer: Boolean) {
         if (ball.speedBoostTimer > 0f) {
             ball.speedBoostTimer = max(0f, ball.speedBoostTimer - dt)
             if (ball.speedBoostTimer <= 0f) {
@@ -414,22 +456,42 @@ class BattleSimulation(
             }
         }
 
-        if (!ball.isUltimateActive) return
-        ball.ultimateTimeRemaining -= dt
+        if (ball.isUltimateActive) {
+            ball.ultimateTimeRemaining -= dt
 
-        if (ball.character.id == "kamado_sun" && kamadoTrailCooldown <= 0f && !ball.isStunned) {
-            kamadoTrailCooldown = 0.38f
-            spawnFireHazard(ball.id, ball.position.x, ball.position.y, ball.radius * 0.82f, 3.4f)
+            val trailCd = if (isPlayer) playerTrailCooldown else aiTrailCooldown
+            if ((ball.character.id == "kamado_sun" || ball.character.id == "shigaraki_decay") && trailCd <= 0f && !ball.isStunned) {
+                if (isPlayer) playerTrailCooldown = 0.42f else aiTrailCooldown = 0.42f
+                spawnFireHazard(ball.id, ball.position.x, ball.position.y, ball.radius * 0.82f, 3.4f)
+            }
+
+            if (ball.ultimateTimeRemaining <= 0f) {
+                ball.isUltimateActive = false
+                ball.ultimateTimeRemaining = 0f
+                ball.isSeriousActive = false
+                ball.kamuiBounceStacks = 0
+                ball.ultimateGauge = 0f
+                // Enter mandatory post-Ultimate cooldown for BOTH Player and AI!
+                ball.ultimateCooldownRemaining = ball.character.ultimateCooldownSeconds
+            }
+            return
         }
 
-        if (ball.ultimateTimeRemaining <= 0f) {
-            ball.isUltimateActive = false
-            ball.isSeriousActive = false
-            ball.kamuiBounceStacks = 0
+        if (ball.ultimateCooldownRemaining > 0f) {
+            ball.ultimateCooldownRemaining = max(0f, ball.ultimateCooldownRemaining - dt)
+            ball.ultimateGauge = 0f
+            return
         }
+
+        // Steady combat spirit charge while actively ricocheting
+        ball.addUltimate(4.0f * dt)
     }
 
     private fun updateStatusEffects(ball: CombatBall, dt: Float) {
+        if (ball.slowTimer > 0f) {
+            ball.slowTimer = max(0f, ball.slowTimer - dt)
+        }
+
         if (ball.stunTimeRemaining > 0f) {
             ball.stunTimeRemaining = max(0f, ball.stunTimeRemaining - dt)
             if (ball.stunTimeRemaining <= 0f) {
@@ -511,30 +573,42 @@ class BattleSimulation(
 
         if (bouncedX || bouncedY) {
             ball.wallBounceCombo++
-            ball.addUltimate(3.5f)
+            ball.totalWallBounces++
+            ball.addUltimate(3.8f)
 
-            // Character wall-bounce passives & ultimates
-            if (ball.character.id == "mugiwara_joy") {
-                ball.speedBoostMultiplier = 1.18f
-                ball.speedBoostTimer = 0.75f
-                if (ball.isUltimateActive) {
-                    spawnShockwave(ball.position.x, ball.position.y, Color.White, ball.radius * 2.1f)
+            when (ball.character.id) {
+                "mugiwara_joy" -> {
+                    ball.speedBoostMultiplier = 1.18f
+                    ball.speedBoostTimer = 0.75f
+                    if (ball.isUltimateActive) {
+                        spawnShockwave(ball.position.x, ball.position.y, Color.White, ball.radius * 2.1f)
+                    }
+                }
+                "okarun_turbo" -> {
+                    ball.speedBoostMultiplier = 1.20f
+                    ball.speedBoostTimer = 0.80f
+                }
+                "rimuru_tempest" -> {
+                    if (ball.totalWallBounces % 3 == 0) {
+                        ball.currentHp = min(ball.maxHp, ball.currentHp + 2f)
+                    }
                 }
             }
-            if (ball.isUltimateActive && ball.character.id == "raikiri_shinobi") {
-                ball.kamuiBounceStacks = min(6, ball.kamuiBounceStacks + 1)
-            }
-            if (ball.isUltimateActive && ball.character.id == "dragneel_ignis") {
-                spawnFireHazard(ball.id, ball.position.x, ball.position.y, ball.radius * 0.85f, 3.2f)
+
+            if (ball.isUltimateActive) {
+                when (ball.character.id) {
+                    "raikiri_shinobi" -> ball.kamuiBounceStacks = min(6, ball.kamuiBounceStacks + 1)
+                    "dragneel_ignis", "gabimaru_hollow", "en_dorohedoro" -> {
+                        spawnFireHazard(ball.id, ball.position.x, ball.position.y, ball.radius * 0.85f, 3.2f)
+                    }
+                }
             }
 
-            // Prevent boring wall-hugging loops: guarantee healthy inward cross-court angle + slight rival magnetism
             val speed = max(ball.velocity.length(), computeTargetCruiseSpeed(ball))
             val rival = if (ball === playerBall) opponentBall else playerBall
             val toRival = (rival.position - ball.position).normalized()
             val blendedDir = sanitizeLaunchAngle((ball.velocity.normalized() * 0.88f + toRival * 0.12f).normalized())
 
-            // Make sure the ball still moves away from the wall it just touched!
             val finalVx = when {
                 ball.position.x <= wallLeft + 1f -> abs(blendedDir.x)
                 ball.position.x >= wallRight - 1f -> -abs(blendedDir.x)
@@ -549,8 +623,8 @@ class BattleSimulation(
             ball.resumeDirection = cleanDir
             ball.velocity = cleanDir * speed
 
-            ball.squashFactor = 0.72f
-            ball.stretchFactor = 1.22f
+            ball.squashFactor = 0.80f
+            ball.stretchFactor = 1.15f
             ball.deformAngle = atan2(normal.y, normal.x)
 
             spawnImpactBurst(
@@ -566,15 +640,14 @@ class BattleSimulation(
     private fun checkBallToBallCollision() {
         val delta = opponentBall.position - playerBall.position
         val dist = delta.length()
-        // Roronoa's triple orbiting katanas grant slightly wider effective strike contact
-        val reachBonus = if (playerBall.character.id == "roronoa_ashura" || opponentBall.character.id == "roronoa_ashura") 6f else 0f
+        val hasWideReach = playerBall.character.id in WIDE_REACH_IDS || opponentBall.character.id in WIDE_REACH_IDS
+        val reachBonus = if (hasWideReach) 6f else 0f
         val minDist = playerBall.radius + opponentBall.radius + reachBonus
 
         if (dist >= minDist || dist < 0.0001f) return
 
         val normal = delta / dist
 
-        // Resolve overlap cleanly
         val overlap = minDist - dist
         playerBall.position = Vector2(
             (playerBall.position.x - normal.x * overlap * 0.52f).coerceIn(wallLeft, wallRight),
@@ -598,11 +671,10 @@ class BattleSimulation(
         val m1 = playerBall.character.massRating
         val m2 = opponentBall.character.massRating
 
-        // Elastic momentum exchange + guaranteed nonstop rebound speeds
         val effectiveRel = min(velAlongNormal, -baseArenaSpeed * 0.45f)
         var impulseMag = -2.0f * effectiveRel / ((1f / m1) + (1f / m2))
-        if (attacker.character.id == "kakarot_z") {
-            impulseMag *= 1.40f
+        if (attacker.character.id == "kakarot_z" || attacker.character.id == "tetsuo_psychic") {
+            impulseMag *= 1.38f
         }
         val impulseVec = normal * impulseMag
 
@@ -613,7 +685,7 @@ class BattleSimulation(
                 playerBall.velocity - (impulseVec / m1)
             }
             val dir1 = sanitizeLaunchAngle(if (rawV1.length() > 5f) rawV1.normalized() else (normal * -1f))
-            val boost1 = if (!isPlayerAttacker && attacker.character.id == "kakarot_z") 1.32f else 1.08f
+            val boost1 = if (!isPlayerAttacker && (attacker.character.id == "kakarot_z" || attacker.character.id == "tetsuo_psychic")) 1.30f else 1.08f
             playerBall.resumeDirection = dir1
             playerBall.velocity = dir1 * (computeTargetCruiseSpeed(playerBall) * boost1)
         }
@@ -625,18 +697,18 @@ class BattleSimulation(
                 opponentBall.velocity + (impulseVec / m2)
             }
             val dir2 = sanitizeLaunchAngle(if (rawV2.length() > 5f) rawV2.normalized() else normal)
-            val boost2 = if (isPlayerAttacker && attacker.character.id == "kakarot_z") 1.32f else 1.08f
+            val boost2 = if (isPlayerAttacker && (attacker.character.id == "kakarot_z" || attacker.character.id == "tetsuo_psychic")) 1.30f else 1.08f
             opponentBall.resumeDirection = dir2
             opponentBall.velocity = dir2 * (computeTargetCruiseSpeed(opponentBall) * boost2)
         }
 
-        playerBall.squashFactor = 0.68f
-        playerBall.stretchFactor = 1.24f
+        playerBall.squashFactor = 0.78f
+        playerBall.stretchFactor = 1.16f
         playerBall.deformAngle = atan2(normal.y, normal.x)
         playerBall.weaponSpinBurst = 16f
 
-        opponentBall.squashFactor = 0.68f
-        opponentBall.stretchFactor = 1.24f
+        opponentBall.squashFactor = 0.78f
+        opponentBall.stretchFactor = 1.16f
         opponentBall.deformAngle = atan2(-normal.y, -normal.x)
         opponentBall.weaponSpinBurst = 16f
 
@@ -644,8 +716,6 @@ class BattleSimulation(
         collisionCooldown = 0.16f
 
         resolveCollisionCombat(attacker, defender, isPlayerAttacker, pSpeed, oSpeed)
-
-        // Reset bank-shot bounce combo after impact lands
         attacker.wallBounceCombo = 0
     }
 
@@ -656,8 +726,12 @@ class BattleSimulation(
         pSpeed: Float,
         oSpeed: Float
     ) {
-        val bankBonus = min(10, attacker.wallBounceCombo * 2)
-        var damage = attacker.character.baseDamage.toFloat() + bankBonus
+        val bankBonus = when (attacker.character.id) {
+            "vash_stampede" -> min(16, attacker.wallBounceCombo * 4)
+            "midoriya_ofa" -> min(12, attacker.wallBounceCombo * 3)
+            else -> min(10, attacker.wallBounceCombo * 2)
+        }
+        var damage = attacker.character.baseDamage.toFloat() + bankBonus + attacker.meruemDamageStacks
         var isCrit = bankBonus >= 4
 
         if (attacker.isUltimateActive) {
@@ -665,15 +739,29 @@ class BattleSimulation(
             isCrit = true
         }
 
-        // Attacker Archetype Passives
+        // Attacker Passives (all 48 fighters)
         when (attacker.character.id) {
-            "kamado_sun" -> {
+            "kamado_sun", "shigaraki_decay" -> {
                 defender.bleedTicksRemaining = 4
                 defender.bleedTimer = 0f
             }
-            "roronoa_ashura" -> {
+            "roronoa_ashura", "ryuko_scissor" -> {
                 defender.bleedTicksRemaining = max(defender.bleedTicksRemaining, 3)
                 defender.bleedTimer = 0f
+                if (attacker.character.id == "ryuko_scissor") {
+                    attacker.speedBoostMultiplier = 1.15f
+                    attacker.speedBoostTimer = 0.65f
+                }
+            }
+            "hyakkimaru_dororo" -> {
+                defender.bleedTicksRemaining = 4
+                defender.bleedTimer = 0f
+                if (defender.character.alignment == CharacterAlignment.ANTAGONIST) {
+                    damage += 3f
+                }
+                if (attacker.isUltimateActive) {
+                    attacker.currentHp = min(attacker.maxHp, attacker.currentHp + 4f)
+                }
             }
             "raikiri_shinobi" -> {
                 if (!defender.isStunned) {
@@ -686,22 +774,45 @@ class BattleSimulation(
                 attacker.currentHp = min(attacker.maxHp, attacker.currentHp + heal)
                 spawnFloatingText("+${heal.toInt()} HP", attacker.position.x, attacker.position.y - attacker.radius, Color(0xFF4ADE80))
             }
-            "dragneel_ignis" -> {
+            "muzan_progenitor" -> {
+                val heal = if (attacker.isUltimateActive) 6f else 3f
+                attacker.currentHp = min(attacker.maxHp, attacker.currentHp + heal)
+                defender.bleedTicksRemaining = max(defender.bleedTicksRemaining, 3)
+                defender.bleedTimer = 0f
+            }
+            "dio_world" -> {
+                attacker.currentHp = min(attacker.maxHp, attacker.currentHp + 3f)
+                defender.ultimateGauge = max(0f, defender.ultimateGauge - 8f)
+            }
+            "dragneel_ignis", "gabimaru_hollow" -> {
                 spawnFireHazard(attacker.id, defender.position.x, defender.position.y, defender.radius * 0.90f, 3.6f)
             }
             "asta_grimoire" -> {
                 defender.ultimateGauge = max(0f, defender.ultimateGauge - 12f)
             }
-            "kurosaki_hollow" -> {
+            "blackbeard_tremor" -> {
+                defender.ultimateGauge = max(0f, defender.ultimateGauge - 10f)
+            }
+            "kurosaki_hollow", "frieza_emperor", "kafka_kaiju" -> {
                 val mySpd = if (isPlayerAttacker) pSpeed else oSpeed
                 val theirSpd = if (isPlayerAttacker) oSpeed else pSpeed
-                if (mySpd > theirSpd) damage += 4f
+                if (mySpd >= theirSpd) damage += 4f
             }
-            "killua_godspeed" -> {
+            "killua_godspeed", "gilgamesh_babylon" -> {
                 damage += 3f
             }
             "kujo_star" -> {
                 damage += 4f
+            }
+            "guts_berserk" -> {
+                val missingRatio = ((100f - attacker.currentHp) / 100f).coerceIn(0f, 1f)
+                damage *= (1f + missingRatio * 0.35f)
+            }
+            "meruem_chimera" -> {
+                attacker.meruemDamageStacks = min(8, attacker.meruemDamageStacks + 1)
+            }
+            "ainz_overlord", "en_dorohedoro" -> {
+                defender.slowTimer = 1.55f
             }
             "caped_baldy" -> {
                 if (attacker.isSeriousActive) {
@@ -734,20 +845,45 @@ class BattleSimulation(
             }
         }
 
-        // Defender Archetype Passives (unless bypassed by Frieren's Zoltraak Ult)
-        val ignoresDefense = attacker.character.id == "frieren_zoltraak" && attacker.isUltimateActive
+        // Defender Passives (unless bypassed by piercing Ultimates)
+        val ignoresDefense = attacker.character.id == "shigaraki_decay" ||
+            (attacker.isUltimateActive && attacker.character.id in DEFENSE_PIERCING_ULT_IDS)
+
         if (!ignoresDefense) {
-            if (defender.character.id == "satoru_void") {
-                damage *= 0.80f
-                defender.isShieldActive = true
+            when (defender.character.id) {
+                "satoru_void" -> {
+                    damage *= 0.80f
+                    defender.isShieldActive = true
+                }
+                "aizen_kyoka", "madara_uchiha", "griffith_femto" -> {
+                    damage *= 0.82f
+                }
+                "bondrewd_dawn" -> {
+                    damage *= 0.80f
+                    defender.addUltimate(6f)
+                }
+                "caiman_dorohedoro" -> {
+                    if (attacker.character.classType == CharacterClass.CONTROL_MAGIC || attacker.character.element == ElementTag.MAGIC) {
+                        damage *= 0.70f
+                    }
+                }
+                "elric_fullmetal", "makima_control" -> {
+                    val reflected = max(1, (damage * 0.25f).toInt())
+                    attacker.currentHp = max(0f, attacker.currentHp - reflected)
+                    attacker.hitFlashTimer = 0.5f
+                }
+                "accelerator_vector" -> {
+                    val reflected = max(1, (damage * 0.28f).toInt())
+                    attacker.currentHp = max(0f, attacker.currentHp - reflected)
+                    attacker.hitFlashTimer = 0.5f
+                }
+                "phosphophyllite_gem" -> {
+                    val reflected = max(1, (damage * 0.15f).toInt())
+                    attacker.currentHp = max(0f, attacker.currentHp - reflected)
+                }
             }
             if (defender.character.id == "killua_godspeed" && defender.isUltimateActive) {
                 damage *= 0.50f
-            }
-            if (defender.character.id == "elric_fullmetal") {
-                val reflected = max(1, (damage * 0.25f).toInt())
-                attacker.currentHp = max(0f, attacker.currentHp - reflected)
-                attacker.hitFlashTimer = 0.5f
             }
         }
 
@@ -755,7 +891,7 @@ class BattleSimulation(
         defender.currentHp = max(0f, defender.currentHp - finalDmg)
         defender.hitFlashTimer = 0.9f
 
-        // Charge Ultimate meters
+        // Charge Ultimate meters (only charges when not active and not on cooldown)
         attacker.addUltimate(18f)
         val defGain = if (defender.character.id == "kageyama_esper") 21f else 14f
         defender.addUltimate(defGain)
@@ -791,8 +927,8 @@ class BattleSimulation(
         if (speed > 40f) {
             ball.deformAngle = atan2(ball.velocity.y, ball.velocity.x)
             val speedNorm = (speed / (baseArenaSpeed * 1.6f)).coerceIn(0f, 1f)
-            val targetStretch = 1f + speedNorm * 0.18f
-            val targetSquash = 1f - speedNorm * 0.12f
+            val targetStretch = 1f + speedNorm * 0.14f
+            val targetSquash = 1f - speedNorm * 0.10f
             ball.stretchFactor += (targetStretch - ball.stretchFactor) * min(1f, dt * 14f)
             ball.squashFactor += (targetSquash - ball.squashFactor) * min(1f, dt * 14f)
         } else {
@@ -800,56 +936,14 @@ class BattleSimulation(
             ball.squashFactor += (1f - ball.squashFactor) * min(1f, dt * 14f)
         }
 
-        if (engineSettings.physicsMesh == PhysicsMesh.DYNAMIC && ball.hairNodes.isNotEmpty()) {
-            updateVerletHair(ball)
-        }
-
         if (speed > 80f && engineSettings.renderMode != RenderMode.PIXELIZED) {
-            val maxTrail = if (engineSettings.renderMode == RenderMode.REALISTIC) 7 else 4
+            val maxTrail = if (engineSettings.renderMode == RenderMode.REALISTIC) 6 else 4
             ball.trailPositions.addFirst(ball.position)
             while (ball.trailPositions.size > maxTrail) {
                 ball.trailPositions.removeLast()
             }
         } else if (ball.trailPositions.isNotEmpty()) {
             ball.trailPositions.removeLast()
-        }
-    }
-
-    private fun updateVerletHair(ball: CombatBall) {
-        val nodes = ball.hairNodes
-        if (nodes.isEmpty()) return
-
-        val speed = ball.velocity.length()
-        val anchorDir = if (speed > 30f) (ball.velocity * -1f).normalized() else Vector2(0f, -1f)
-        nodes[0].x = ball.position.x + anchorDir.x * (ball.radius * 0.55f)
-        nodes[0].y = ball.position.y + anchorDir.y * (ball.radius * 0.55f)
-
-        for (i in 1 until nodes.size) {
-            nodes[i].update(friction = 0.86f)
-            nodes[i].y -= 0.7f
-        }
-
-        val segLength = ball.radius * 0.30f
-        repeat(2) {
-            for (i in 0 until nodes.size - 1) {
-                val p1 = nodes[i]
-                val p2 = nodes[i + 1]
-                val dx = p2.x - p1.x
-                val dy = p2.y - p1.y
-                val dist = hypot(dx, dy)
-                if (dist > 0.0001f) {
-                    val diff = (dist - segLength) / dist
-                    if (i == 0) {
-                        p2.x -= dx * diff
-                        p2.y -= dy * diff
-                    } else {
-                        p1.x += dx * diff * 0.45f
-                        p1.y += dy * diff * 0.45f
-                        p2.x -= dx * diff * 0.55f
-                        p2.y -= dy * diff * 0.55f
-                    }
-                }
-            }
         }
     }
 
@@ -967,5 +1061,10 @@ class BattleSimulation(
             }
             t--
         }
+    }
+
+    companion object {
+        private val WIDE_REACH_IDS = setOf("roronoa_ashura", "gilgamesh_babylon", "phosphophyllite_gem")
+        private val DEFENSE_PIERCING_ULT_IDS = setOf("frieren_zoltraak", "simon_spiral", "bondrewd_dawn")
     }
 }

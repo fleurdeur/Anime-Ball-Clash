@@ -99,7 +99,7 @@ fun BattleArenaScreen(
             .testTag("battle_arena_screen"),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        // 1. Clean Top Fighter Health & Status Bar (only recomposes when integer HP changes)
+        // 1. Symmetric Top Fighter HUD: HP + Ultimate Progress & Cooldown Bars for BOTH Player and AI
         ArenaTopHud(
             playerName = simulation.playerBall.character.name,
             opponentName = simulation.opponentBall.character.name,
@@ -128,7 +128,7 @@ fun BattleArenaScreen(
                 onPlayerLaunch = onPlayerLaunch
             )
 
-            // Opening Launch Prompt Overlay (disappears permanently once launched)
+            // Opening Launch Prompt Overlay
             if (turnState == TurnState.AIM_OPENING) {
                 Column(
                     modifier = Modifier
@@ -170,7 +170,7 @@ fun BattleArenaScreen(
             }
         }
 
-        // 3. Bottom Tactical Action Bar (Redirect status + Ultimate Awakening button)
+        // 3. Bottom Tactical Bar (Redirect + Player Ultimate Progress/Cooldown Action Button)
         ArenaBottomBar(
             ultimateName = simulation.playerBall.character.ultimateName,
             hudState = hudState,
@@ -211,37 +211,22 @@ private fun ArenaTopHud(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                // Player HP Column
-                Column(modifier = Modifier.weight(1f)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = playerName,
-                            style = MaterialTheme.typography.titleMedium,
-                            color = palette.textPrimary,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        Text(
-                            text = "${hudState.playerHp} HP",
-                            style = MaterialTheme.typography.labelLarge,
-                            color = palette.greenAccent
-                        )
-                    }
-                    Spacer(modifier = Modifier.height(5.dp))
-                    LinearProgressIndicator(
-                        progress = { (hudState.playerHp / 100f).coerceIn(0f, 1f) },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(10.dp)
-                            .clip(RoundedCornerShape(50)),
-                        color = palette.greenAccent,
-                        trackColor = palette.elevatedSurface
-                    )
-                }
+                // Player Fighter Column (HP + Ultimate Progress/Cooldown Bar)
+                FighterHudColumn(
+                    name = playerName,
+                    hp = hudState.playerHp,
+                    hpColor = palette.greenAccent,
+                    ultPercent = hudState.playerUltPercent,
+                    isUltActive = hudState.isPlayerUltActive,
+                    ultActiveHalfSecs = hudState.playerUltActiveHalfSecs,
+                    ultCooldownHalfSecs = hudState.playerUltCooldownHalfSecs,
+                    ultMaxDurationSec = hudState.playerUltMaxDurationSec,
+                    ultMaxCooldownSec = hudState.playerUltMaxCooldownSec,
+                    palette = palette,
+                    alignRight = false,
+                    testTagPrefix = "player",
+                    modifier = Modifier.weight(1f)
+                )
 
                 // Controls cluster
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -273,37 +258,22 @@ private fun ArenaTopHud(
                     }
                 }
 
-                // Opponent HP Column
-                Column(modifier = Modifier.weight(1f)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "${hudState.opponentHp} HP",
-                            style = MaterialTheme.typography.labelLarge,
-                            color = palette.primaryAccent
-                        )
-                        Text(
-                            text = opponentName,
-                            style = MaterialTheme.typography.titleMedium,
-                            color = palette.textPrimary,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-                    Spacer(modifier = Modifier.height(5.dp))
-                    LinearProgressIndicator(
-                        progress = { (hudState.opponentHp / 100f).coerceIn(0f, 1f) },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(10.dp)
-                            .clip(RoundedCornerShape(50)),
-                        color = palette.primaryAccent,
-                        trackColor = palette.elevatedSurface
-                    )
-                }
+                // AI Opponent Fighter Column (HP + AI Ultimate Progress/Cooldown Bar)
+                FighterHudColumn(
+                    name = opponentName,
+                    hp = hudState.opponentHp,
+                    hpColor = palette.primaryAccent,
+                    ultPercent = hudState.opponentUltPercent,
+                    isUltActive = hudState.isOpponentUltActive,
+                    ultActiveHalfSecs = hudState.opponentUltActiveHalfSecs,
+                    ultCooldownHalfSecs = hudState.opponentUltCooldownHalfSecs,
+                    ultMaxDurationSec = hudState.opponentUltMaxDurationSec,
+                    ultMaxCooldownSec = hudState.opponentUltMaxCooldownSec,
+                    palette = palette,
+                    alignRight = true,
+                    testTagPrefix = "opponent",
+                    modifier = Modifier.weight(1f)
+                )
             }
 
             if (hudState.lastImpactBanner.isNotEmpty()) {
@@ -321,10 +291,155 @@ private fun ArenaTopHud(
     }
 }
 
-/**
- * Leaf Composable: `frameTick` is ONLY read inside `Canvas { ... }` DrawScope,
- * guaranteeing 0 layout/recomposition overhead during nonstop 60-120 FPS physics!
- */
+@Composable
+private fun FighterHudColumn(
+    name: String,
+    hp: Int,
+    hpColor: Color,
+    ultPercent: Int,
+    isUltActive: Boolean,
+    ultActiveHalfSecs: Int,
+    ultCooldownHalfSecs: Int,
+    ultMaxDurationSec: Float,
+    ultMaxCooldownSec: Float,
+    palette: AppPalette,
+    alignRight: Boolean,
+    testTagPrefix: String,
+    modifier: Modifier = Modifier
+) {
+    val isOnCooldown = ultCooldownHalfSecs > 0
+    val isReady = !isUltActive && !isOnCooldown && ultPercent >= 100
+
+    val ultProgress = when {
+        isUltActive -> ((ultActiveHalfSecs / 2f) / ultMaxDurationSec.coerceAtLeast(1f)).coerceIn(0f, 1f)
+        isOnCooldown -> ((ultCooldownHalfSecs / 2f) / ultMaxCooldownSec.coerceAtLeast(1f)).coerceIn(0f, 1f)
+        else -> (ultPercent / 100f).coerceIn(0f, 1f)
+    }
+
+    val ultBarColor = when {
+        isUltActive -> palette.goldAccent
+        isOnCooldown -> palette.textMuted
+        isReady -> palette.primaryAccent
+        else -> palette.blueAccent
+    }
+
+    val ultStatusLabel = when {
+        isUltActive -> "AWAKEN ${ultActiveHalfSecs / 2f}s"
+        isOnCooldown -> "CD ${ultCooldownHalfSecs / 2f}s"
+        isReady -> "ULT READY!"
+        else -> "ULT $ultPercent%"
+    }
+
+    Column(modifier = modifier) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            if (!alignRight) {
+                Text(
+                    text = name,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = palette.textPrimary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false)
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                Text(
+                    text = "$hp HP",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = hpColor
+                )
+            } else {
+                Text(
+                    text = "$hp HP",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = hpColor
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                Text(
+                    text = name,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = palette.textPrimary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false)
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(4.dp))
+
+        LinearProgressIndicator(
+            progress = { (hp / 100f).coerceIn(0f, 1f) },
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(9.dp)
+                .clip(RoundedCornerShape(50)),
+            color = hpColor,
+            trackColor = palette.elevatedSurface
+        )
+
+        Spacer(modifier = Modifier.height(5.dp))
+
+        // Symmetric Ultimate Progress / Active / Cooldown Bar
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("${testTagPrefix}_ult_bar_row"),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(5.dp)
+        ) {
+            if (!alignRight) {
+                Icon(
+                    Icons.Default.Bolt,
+                    contentDescription = null,
+                    tint = ultBarColor,
+                    modifier = Modifier.size(12.dp)
+                )
+                LinearProgressIndicator(
+                    progress = { ultProgress },
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(5.dp)
+                        .clip(RoundedCornerShape(50)),
+                    color = ultBarColor,
+                    trackColor = palette.elevatedSurface
+                )
+                Text(
+                    text = ultStatusLabel,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = ultBarColor,
+                    maxLines = 1
+                )
+            } else {
+                Text(
+                    text = ultStatusLabel,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = ultBarColor,
+                    maxLines = 1
+                )
+                LinearProgressIndicator(
+                    progress = { ultProgress },
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(5.dp)
+                        .clip(RoundedCornerShape(50)),
+                    color = ultBarColor,
+                    trackColor = palette.elevatedSurface
+                )
+                Icon(
+                    Icons.Default.Bolt,
+                    contentDescription = null,
+                    tint = ultBarColor,
+                    modifier = Modifier.size(12.dp)
+                )
+            }
+        }
+    }
+}
+
 @Composable
 private fun ArenaCourtCanvas(
     simulation: BattleSimulation,
@@ -403,7 +518,6 @@ private fun ArenaCourtCanvas(
             }
             .testTag("arena_playfield_canvas")
     ) {
-        // Observe frameTick solely inside DrawScope!
         val tick = frameTick
         if (tick < 0) return@Canvas
 
@@ -418,7 +532,6 @@ private fun ArenaCourtCanvas(
             val courtW = size.width - pad * 2f
             val courtH = size.height - pad * 2f
 
-            // 1. Crisp athletic court markings
             drawRoundRect(
                 color = palette.stageLine,
                 topLeft = Offset(pad, pad),
@@ -440,7 +553,6 @@ private fun ArenaCourtCanvas(
                 style = Stroke(width = 2f)
             )
 
-            // 2. Reactive wall impact flashes
             if (simulation.wallFlashLeft > 0.02f) {
                 drawLine(
                     color = palette.blueAccent.copy(alpha = simulation.wallFlashLeft),
@@ -474,10 +586,8 @@ private fun ArenaCourtCanvas(
                 )
             }
 
-            // 3. Floor fire hazards
             CombatVfxRenderer.drawFloorHazards(this, simulation.fireHazards, simulation.globalTime)
 
-            // 4. Opening reticle or drag trajectory laser
             if (turnState == TurnState.AIM_OPENING) {
                 TrajectoryPredictor.drawReadyReticle(
                     scope = this,
@@ -504,7 +614,6 @@ private fun ArenaCourtCanvas(
                 )
             }
 
-            // 5. Render Opponent & Player Anime Spheres (all details locked onto Offset.Zero)
             AnimeBallRenderer.drawBall(
                 scope = this,
                 ball = simulation.opponentBall,
@@ -520,7 +629,6 @@ private fun ArenaCourtCanvas(
                 globalTime = simulation.globalTime
             )
 
-            // 6. Subtle Player ring marker so player always tracks their sphere at high speed
             drawCircle(
                 color = Color(0xFF3CC27B).copy(alpha = 0.55f),
                 radius = simulation.playerBall.radius * 1.12f,
@@ -528,7 +636,6 @@ private fun ArenaCourtCanvas(
                 style = Stroke(width = 2f)
             )
 
-            // 7. Shockwaves, sparks & damage numbers
             CombatVfxRenderer.drawVfx(
                 scope = this,
                 particles = simulation.particles,
@@ -550,7 +657,14 @@ private fun ArenaBottomBar(
     palette: AppPalette,
     onTriggerUltimate: () -> Unit
 ) {
-    val ultReady = hudState.playerUltPercent >= 100 && !hudState.isPlayerUltActive
+    val isPlayerOnCd = hudState.playerUltCooldownHalfSecs > 0
+    val ultReady = hudState.playerUltPercent >= 100 && !hudState.isPlayerUltActive && !isPlayerOnCd
+
+    val bottomProgress = when {
+        hudState.isPlayerUltActive -> ((hudState.playerUltActiveHalfSecs / 2f) / hudState.playerUltMaxDurationSec.coerceAtLeast(1f)).coerceIn(0f, 1f)
+        isPlayerOnCd -> ((hudState.playerUltCooldownHalfSecs / 2f) / hudState.playerUltMaxCooldownSec.coerceAtLeast(1f)).coerceIn(0f, 1f)
+        else -> (hudState.playerUltPercent / 100f).coerceIn(0f, 1f)
+    }
 
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -567,7 +681,7 @@ private fun ArenaBottomBar(
             ),
             modifier = Modifier
                 .weight(0.95f)
-                .height(54.dp)
+                .height(56.dp)
         ) {
             Row(
                 modifier = Modifier.padding(horizontal = 12.dp),
@@ -603,40 +717,86 @@ private fun ArenaBottomBar(
             }
         }
 
-        // Ultimate Awakening Button
-        Button(
-            onClick = onTriggerUltimate,
+        // Player Ultimate Awakening Button with embedded Progress & Cooldown Bar
+        Surface(
+            onClick = { if (ultReady) onTriggerUltimate() },
             enabled = ultReady,
             shape = RoundedCornerShape(16.dp),
-            colors = ButtonDefaults.buttonColors(
-                containerColor = if (hudState.isPlayerUltActive) palette.goldAccent else palette.primaryAccent,
-                contentColor = Color(0xFFF8FAFC),
-                disabledContainerColor = palette.cardSurface,
-                disabledContentColor = palette.textSecondary
+            color = when {
+                hudState.isPlayerUltActive -> palette.goldAccentSoft
+                ultReady -> palette.primaryAccent
+                else -> palette.cardSurface
+            },
+            border = BorderStroke(
+                1.dp,
+                when {
+                    hudState.isPlayerUltActive -> palette.goldAccent
+                    ultReady -> palette.primaryAccent
+                    else -> palette.border
+                }
             ),
-            contentPadding = PaddingValues(horizontal = 14.dp),
             modifier = Modifier
-                .weight(1.25f)
-                .height(54.dp)
+                .weight(1.30f)
+                .height(56.dp)
                 .testTag("ultimate_awaken_button")
         ) {
-            Icon(
-                Icons.Default.Bolt,
-                contentDescription = null,
-                tint = if (ultReady || hudState.isPlayerUltActive) Color.White else palette.goldAccent,
-                modifier = Modifier.size(20.dp)
-            )
-            Spacer(modifier = Modifier.width(6.dp))
-            Text(
-                text = when {
-                    hudState.isPlayerUltActive -> "AWAKENED!"
-                    ultReady -> "AWAKEN: $ultimateName"
-                    else -> "Ultimate ${hudState.playerUltPercent}%"
-                },
-                style = MaterialTheme.typography.labelLarge,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 12.dp, vertical = 7.dp),
+                verticalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(
+                        Icons.Default.Bolt,
+                        contentDescription = null,
+                        tint = when {
+                            ultReady -> Color.White
+                            hudState.isPlayerUltActive -> palette.goldAccent
+                            isPlayerOnCd -> palette.textMuted
+                            else -> palette.goldAccent
+                        },
+                        modifier = Modifier.size(17.dp)
+                    )
+                    Spacer(modifier = Modifier.width(5.dp))
+                    Text(
+                        text = when {
+                            hudState.isPlayerUltActive -> "AWAKENED • ${hudState.playerUltActiveHalfSecs / 2f}s"
+                            isPlayerOnCd -> "COOLDOWN • ${hudState.playerUltCooldownHalfSecs / 2f}s"
+                            ultReady -> "AWAKEN: $ultimateName"
+                            else -> "Ultimate ${hudState.playerUltPercent}%"
+                        },
+                        style = MaterialTheme.typography.labelLarge,
+                        color = when {
+                            ultReady -> Color.White
+                            hudState.isPlayerUltActive -> palette.goldAccent
+                            isPlayerOnCd -> palette.textSecondary
+                            else -> palette.textPrimary
+                        },
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+
+                LinearProgressIndicator(
+                    progress = { bottomProgress },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(5.dp)
+                        .clip(RoundedCornerShape(50)),
+                    color = when {
+                        ultReady -> Color.White
+                        hudState.isPlayerUltActive -> palette.goldAccent
+                        isPlayerOnCd -> palette.textMuted
+                        else -> palette.blueAccent
+                    },
+                    trackColor = if (ultReady) Color.White.copy(alpha = 0.28f) else palette.elevatedSurface
+                )
+            }
         }
     }
 }

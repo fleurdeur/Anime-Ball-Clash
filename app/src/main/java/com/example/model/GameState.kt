@@ -164,15 +164,16 @@ object InitialGameData {
 
     private val rivalSeeds = listOf(
         LeaderboardEntry(1, "SungShadow_KR", "jinwoo_monarch", 1890, "Master", "84%"),
-        LeaderboardEntry(2, "SixEyes_Satoru", "satoru_void", 1740, "Master", "81%"),
-        LeaderboardEntry(3, "Zoltraak_Mage", "frieren_zoltraak", 1520, "Diamond", "78%"),
-        LeaderboardEntry(4, "ShrineKing", "sukuna_shrine", 1340, "Diamond", "75%"),
-        LeaderboardEntry(5, "SeriousCaped", "caped_baldy", 1120, "Diamond", "73%"),
-        LeaderboardEntry(6, "ZoldyckVolt", "killua_godspeed", 890, "Platinum", "70%"),
-        LeaderboardEntry(7, "Santoryu_Z", "roronoa_ashura", 680, "Gold", "66%"),
-        LeaderboardEntry(8, "HollowMask_15", "kurosaki_hollow", 440, "Gold", "62%"),
-        LeaderboardEntry(9, "SunBreather", "kamado_sun", 220, "Silver", "58%"),
-        LeaderboardEntry(10, "Rookie Sparring", "mugiwara_joy", 80, "Bronze", "51%")
+        LeaderboardEntry(2, "VectorOneWay", "accelerator_vector", 1780, "Master", "82%"),
+        LeaderboardEntry(3, "SixEyes_Satoru", "satoru_void", 1690, "Master", "80%"),
+        LeaderboardEntry(4, "ShrineKing", "sukuna_shrine", 1480, "Diamond", "77%"),
+        LeaderboardEntry(5, "DawnBondrewd", "bondrewd_dawn", 1290, "Diamond", "74%"),
+        LeaderboardEntry(6, "SeriousCaped", "caped_baldy", 1120, "Diamond", "72%"),
+        LeaderboardEntry(7, "GoldenTyrant", "frieza_emperor", 910, "Platinum", "69%"),
+        LeaderboardEntry(8, "TyphoonVash", "vash_stampede", 680, "Gold", "66%"),
+        LeaderboardEntry(9, "DecayHand", "shigaraki_decay", 420, "Gold", "61%"),
+        LeaderboardEntry(10, "SunBreather", "kamado_sun", 210, "Silver", "57%"),
+        LeaderboardEntry(11, "Rookie Sparring", "mugiwara_joy", 80, "Bronze", "51%")
     )
 
     fun buildLeaderboard(profile: PlayerProfile): List<LeaderboardEntry> {
@@ -192,8 +193,8 @@ object InitialGameData {
 
     val combatTips = listOf(
         "Once launched, both spheres ricochet nonstop off walls and each other until one hits 0 HP.",
-        "Every wall bounce before hitting your rival adds +2 bank-shot bonus damage (up to +10).",
-        "Drag anywhere on the court when Redirect is ready to bend your trajectory mid-flight.",
-        "Tap Awaken as soon as your Ultimate meter hits 100% to turn the tide."
+        "Both you and the AI charge Ultimate meters to 100%, unleash Awakenings, and enter cooldown.",
+        "Every wall bounce before hitting your rival adds bank-shot bonus damage.",
+        "Drag anywhere on the court when Redirect is ready to bend your trajectory mid-flight."
     )
 }

@@ -4,6 +4,7 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -20,6 +21,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -59,7 +61,9 @@ import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.example.model.AnimeTier
 import com.example.model.AppScreen
+import com.example.model.CharacterAlignment
 import com.example.model.CharacterClass
 import com.example.model.CharacterData
 import com.example.model.CharacterRoster
@@ -84,19 +88,23 @@ fun CharacterSelectScreen(
     BackHandler { onBack() }
 
     var searchQuery by remember { mutableStateOf("") }
+    var selectedAlignment by remember { mutableStateOf<CharacterAlignment?>(null) }
+    var selectedTier by remember { mutableStateOf<AnimeTier?>(null) }
     var selectedRole by remember { mutableStateOf<CharacterClass?>(null) }
     var inspectedCharacter by remember { mutableStateOf<CharacterData?>(null) }
 
-    val filteredRoster by remember(searchQuery, selectedRole) {
+    val filteredRoster by remember(searchQuery, selectedAlignment, selectedTier, selectedRole) {
         derivedStateOf {
             CharacterRoster.characters.filter { char ->
+                val matchesAlignment = selectedAlignment == null || char.alignment == selectedAlignment
+                val matchesTier = selectedTier == null || char.popularityTier == selectedTier
                 val matchesRole = selectedRole == null || char.classType == selectedRole
                 val q = searchQuery.trim()
                 val matchesSearch = q.isEmpty() ||
                     char.name.contains(q, ignoreCase = true) ||
                     char.title.contains(q, ignoreCase = true) ||
                     char.animeInspiration.contains(q, ignoreCase = true)
-                matchesRole && matchesSearch
+                matchesAlignment && matchesTier && matchesRole && matchesSearch
             }
         }
     }
@@ -138,7 +146,7 @@ fun CharacterSelectScreen(
                             color = palette.textPrimary
                         )
                         Text(
-                            text = "${unlockedIds.size} of ${CharacterRoster.characters.size} unlocked",
+                            text = "${unlockedIds.size} of ${CharacterRoster.characters.size} unlocked • Heroes & Villains",
                             style = MaterialTheme.typography.bodyMedium,
                             color = palette.textSecondary
                         )
@@ -159,7 +167,7 @@ fun CharacterSelectScreen(
                     value = searchQuery,
                     onValueChange = { searchQuery = it },
                     singleLine = true,
-                    placeholder = { Text("Search fighter or anime series...", color = palette.textMuted) },
+                    placeholder = { Text("Search hero, villain, or anime series...", color = palette.textMuted) },
                     leadingIcon = {
                         Icon(Icons.Outlined.Search, contentDescription = null, tint = palette.textSecondary)
                     },
@@ -179,15 +187,43 @@ fun CharacterSelectScreen(
 
                 Spacer(modifier = Modifier.height(8.dp))
 
+                // Filter Row: Protagonists vs Antagonists + Popular / Cult / Niche + Combat Roles
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     RoleChip(
                         label = "All (${CharacterRoster.characters.size})",
-                        selected = selectedRole == null,
-                        onClick = { selectedRole = null }
+                        selected = selectedAlignment == null && selectedTier == null && selectedRole == null,
+                        onClick = {
+                            selectedAlignment = null
+                            selectedTier = null
+                            selectedRole = null
+                        }
                     )
+                    RoleChip(
+                        label = "Protagonists",
+                        selected = selectedAlignment == CharacterAlignment.PROTAGONIST,
+                        onClick = {
+                            selectedAlignment = if (selectedAlignment == CharacterAlignment.PROTAGONIST) null else CharacterAlignment.PROTAGONIST
+                        }
+                    )
+                    RoleChip(
+                        label = "Antagonists",
+                        selected = selectedAlignment == CharacterAlignment.ANTAGONIST,
+                        onClick = {
+                            selectedAlignment = if (selectedAlignment == CharacterAlignment.ANTAGONIST) null else CharacterAlignment.ANTAGONIST
+                        }
+                    )
+                    AnimeTier.entries.forEach { tier ->
+                        RoleChip(
+                            label = tier.displayName,
+                            selected = selectedTier == tier,
+                            onClick = { selectedTier = if (selectedTier == tier) null else tier }
+                        )
+                    }
                     CharacterClass.entries.forEach { role ->
                         RoleChip(
                             label = role.displayName,
@@ -200,7 +236,7 @@ fun CharacterSelectScreen(
                 Spacer(modifier = Modifier.height(8.dp))
 
                 LazyVerticalGrid(
-                    columns = GridCells.Adaptive(minSize = 108.dp),
+                    columns = GridCells.Adaptive(minSize = 112.dp),
                     contentPadding = PaddingValues(bottom = 20.dp, top = 4.dp),
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -233,6 +269,7 @@ fun CharacterSelectScreen(
         val isUnlocked = unlockedIds.contains(char.id)
         val isEquipped = profile.selectedCharacterId == char.id
         val canAfford = profile.gold >= char.unlockCostGold
+        val isVillain = char.alignment == CharacterAlignment.ANTAGONIST
 
         ModalBottomSheet(
             onDismissRequest = { inspectedCharacter = null },
@@ -268,6 +305,36 @@ fun CharacterSelectScreen(
                     }
 
                     Column(modifier = Modifier.weight(1f)) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Surface(
+                                color = if (isVillain) palette.primaryAccentSoft else palette.blueAccentSoft,
+                                shape = RoundedCornerShape(50)
+                            ) {
+                                Text(
+                                    text = char.alignment.displayName,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = if (isVillain) palette.primaryAccent else palette.blueAccent,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                                )
+                            }
+                            Surface(
+                                color = palette.elevatedSurface,
+                                shape = RoundedCornerShape(50)
+                            ) {
+                                Text(
+                                    text = char.popularityTier.displayName,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = palette.textSecondary,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(4.dp))
+
                         Text(
                             text = char.name,
                             style = MaterialTheme.typography.displayMedium,
@@ -308,7 +375,7 @@ fun CharacterSelectScreen(
                     SheetMetric("ROLE", char.classType.displayName, Modifier.weight(1f))
                     SheetMetric("DAMAGE", "${char.baseDamage}", Modifier.weight(1f))
                     SheetMetric("SPEED", "${String.format("%.2fx", char.speedRating)}", Modifier.weight(1f))
-                    SheetMetric("MASS", "${String.format("%.2f", char.massRating)}", Modifier.weight(1f))
+                    SheetMetric("ULT CD", "${char.ultimateCooldownSeconds}s", Modifier.weight(1f))
                 }
 
                 HorizontalDivider(color = palette.border)
@@ -324,7 +391,7 @@ fun CharacterSelectScreen(
 
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text(
-                        text = "Ultimate • ${char.ultimateName} (${char.ultimateDurationSeconds}s)",
+                        text = "Ultimate • ${char.ultimateName} (${char.ultimateDurationSeconds}s • ${char.ultimateCooldownSeconds}s CD)",
                         style = MaterialTheme.typography.titleMedium,
                         color = palette.primaryAccent
                     )
@@ -440,6 +507,7 @@ private fun FighterGridTile(
     onClick: () -> Unit
 ) {
     val palette = AppTheme.palette
+    val isVillain = character.alignment == CharacterAlignment.ANTAGONIST
     val borderColor = when {
         isEquipped -> palette.primaryAccent
         isUnlocked -> palette.border
@@ -462,12 +530,12 @@ private fun FighterGridTile(
         ) {
             Box(
                 modifier = Modifier
-                    .size(74.dp)
+                    .size(72.dp)
                     .clip(CircleShape)
                     .background(palette.stageSurface),
                 contentAlignment = Alignment.Center
             ) {
-                Canvas(modifier = Modifier.size(66.dp)) {
+                Canvas(modifier = Modifier.size(64.dp)) {
                     AnimeBallRenderer.drawPreviewAvatar(
                         scope = this,
                         character = character,
@@ -476,7 +544,7 @@ private fun FighterGridTile(
                 }
             }
 
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(6.dp))
 
             Text(
                 text = character.name,
@@ -487,9 +555,9 @@ private fun FighterGridTile(
             )
 
             Text(
-                text = character.title,
+                text = "${character.alignment.badgeLabel} • ${character.animeInspiration}",
                 style = MaterialTheme.typography.labelSmall,
-                color = palette.textSecondary,
+                color = if (isVillain) palette.primaryAccent else palette.textSecondary,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 textAlign = TextAlign.Center
