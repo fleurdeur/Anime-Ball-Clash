@@ -39,7 +39,7 @@ data class VerletHairNode(
     var oldX: Float,
     var oldY: Float
 ) {
-    fun update(friction: Float = 0.92f) {
+    fun update(friction: Float = 0.90f) {
         val vx = (x - oldX) * friction
         val vy = (y - oldY) * friction
         oldX = x
@@ -54,10 +54,10 @@ data class CombatBall(
     var name: String,
     var position: Vector2,
     var velocity: Vector2,
-    var radius: Float = 56f,
+    var radius: Float = 52f,
     var mass: Float = 1.0f,
     var currentHp: Float = 100f,
-    var delayedHp: Float = 100f, // Smooth fighting-game ghost damage bar
+    var delayedHp: Float = 100f,
     var maxHp: Float = 100f,
     var character: CharacterData,
     var squashFactor: Float = 1.0f,
@@ -67,23 +67,29 @@ data class CombatBall(
     var weaponSpinBurst: Float = 0f,
     var hitFlashTimer: Float = 0f,
     var hairNodes: List<VerletHairNode> = emptyList(),
-    var ultimateGauge: Float = 25f, // Start with 25% tactical meter
+    var ultimateGauge: Float = 0f,
     var isUltimateActive: Boolean = false,
     var ultimateTimeRemaining: Float = 0f,
     var bleedTicksRemaining: Int = 0,
     var bleedTimer: Float = 0f,
     var stunTimeRemaining: Float = 0f,
+    var resumeDirection: Vector2 = Vector2(0f, -1f),
+    var speedBoostTimer: Float = 0f,
+    var speedBoostMultiplier: Float = 1.0f,
+    var kamuiBounceStacks: Int = 0,
+    var jinwooSpeedStacks: Int = 0,
     var isShieldActive: Boolean = false,
     var isSeriousActive: Boolean = false,
     var wallBounceCombo: Int = 0,
-    var trailPositions: MutableList<Vector2> = mutableListOf()
+    val trailPositions: ArrayDeque<Vector2> = ArrayDeque(10)
 ) {
     val isDead: Boolean get() = currentHp <= 0f
     val isStunned: Boolean get() = stunTimeRemaining > 0f
 
     fun addUltimate(amount: Float) {
         if (!isUltimateActive) {
-            ultimateGauge = (ultimateGauge + amount).coerceIn(0f, 100f)
+            val gainMult = if (character.id == "frieren_zoltraak") 1.30f else 1.0f
+            ultimateGauge = (ultimateGauge + amount * gainMult).coerceIn(0f, 100f)
         }
     }
 }
@@ -117,16 +123,17 @@ data class FloatingCombatText(
     var x: Float,
     var y: Float,
     val color: Color,
-    var life: Float = 1.1f,
-    val maxLife: Float = 1.1f,
+    var life: Float = 0.95f,
+    val maxLife: Float = 0.95f,
     val isCrit: Boolean = false
 )
 
 data class FireHazardZone(
     val id: Long,
+    val ownerId: String,
     val x: Float,
     val y: Float,
-    val radius: Float = 52f,
-    var life: Float = 5.0f,
-    val maxLife: Float = 5.0f
+    val radius: Float = 50f,
+    var life: Float = 4.2f,
+    val maxLife: Float = 4.2f
 )

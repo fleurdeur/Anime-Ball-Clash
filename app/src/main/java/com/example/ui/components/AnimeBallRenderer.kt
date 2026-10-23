@@ -3,52 +3,89 @@ package com.example.ui.components
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.drawscope.rotate
-import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.graphics.drawscope.withTransform
+import com.example.model.CharacterData
 import com.example.model.CombatBall
 import com.example.model.PhysicsMesh
 import com.example.model.RenderMode
-import com.example.model.Vector2
-import com.example.model.VerletHairNode
-import com.example.model.WeaponVisualType
 import kotlin.math.PI
-import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.sin
 
 object AnimeBallRenderer {
 
+    private val sharedPath = Path()
+    private val inkColor = Color(0xFF12151E)
+
+    /**
+     * Zero-allocation portrait renderer for roster cards, stage previews, and headers.
+     */
     fun drawPreviewAvatar(
         scope: DrawScope,
-        character: com.example.model.CharacterData,
-        globalTime: Float = 0f
+        character: CharacterData,
+        weaponAngle: Float = 0.65f,
+        isUltimatePreview: Boolean = false
     ) {
-        val r = (minOf(scope.size.width, scope.size.height) * 0.34f).coerceAtLeast(14f)
-        val cx = scope.size.width / 2f
-        val cy = scope.size.height / 2f + r * 0.08f
-        val dummy = CombatBall(
-            id = "avatar_${character.id}",
-            name = character.name,
-            position = Vector2(cx, cy),
-            velocity = Vector2.Zero,
-            radius = r,
-            character = character,
-            weaponAngle = globalTime * 2.2f,
-            hairNodes = List(5) { idx ->
-                VerletHairNode(cx, cy - r * 0.5f - idx * (r * 0.28f), cx, cy - r * 0.5f - idx * (r * 0.28f))
+        with(scope) {
+            val r = (minOf(size.width, size.height) * 0.33f).coerceAtLeast(12f)
+            val cx = size.width / 2f
+            val cy = size.height / 2f + r * 0.10f
+            val center = Offset(cx, cy)
+
+            drawOval(
+                color = Color.Black.copy(alpha = 0.24f),
+                topLeft = Offset(cx - r * 0.78f, cy + r * 0.72f),
+                size = Size(r * 1.56f, r * 0.34f)
+            )
+
+            drawCircle(
+                color = character.auraColor.copy(alpha = 0.16f),
+                radius = r * 1.22f,
+                center = center
+            )
+
+            // Unified local space around Offset.Zero so crown, hair, hats, and face never detach
+            withTransform({
+                translate(center.x, center.y)
+            }) {
+                drawCharacterCrownAndBack(
+                    char = character,
+                    r = r,
+                    swayRad = 0f,
+                    isUlt = isUltimatePreview
+                )
+                drawCharacterSphereCore(
+                    char = character,
+                    r = r,
+                    isUlt = isUltimatePreview,
+                    isSerious = false,
+                    hitFlash = 0f
+                )
             }
-        )
-        drawBall(scope, dummy, RenderMode.BALANCED, PhysicsMesh.DYNAMIC, globalTime)
+
+            WeaponRenderer.drawWeapon(
+                scope = this,
+                character = character,
+                center = center,
+                radius = r,
+                angle = weaponAngle,
+                isUltimateActive = isUltimatePreview,
+                spinBurst = 0f
+            )
+        }
     }
 
+    /**
+     * Arena combat ball renderer:
+     * All head/body/hair/hat/eye details share ONE unified local origin (Offset.Zero) with
+     * explicit pivot = Offset.Zero so zero details ever lag behind or separate from the sphere!
+     */
     fun drawBall(
         scope: DrawScope,
         ball: CombatBall,
@@ -59,531 +96,570 @@ object AnimeBallRenderer {
         with(scope) {
             val center = Offset(ball.position.x, ball.position.y)
             val r = ball.radius
+            val char = ball.character
+            val isUlt = ball.isUltimateActive
 
-            // 0. MOTION AFTERIMAGE TRAIL
+            // 1. Subtle aura speed streak (smaller than sphere so it never looks like detached parts)
             if (ball.trailPositions.isNotEmpty() && renderMode != RenderMode.PIXELIZED) {
                 val count = ball.trailPositions.size
-                ball.trailPositions.forEachIndexed { idx, pos ->
+                var idx = 0
+                for (pos in ball.trailPositions) {
                     val ratio = 1f - (idx.toFloat() / count)
                     drawCircle(
-                        color = ball.character.auraColor.copy(alpha = ratio * 0.26f),
-                        radius = r * (0.55f + ratio * 0.42f),
+                        color = char.auraColor.copy(alpha = ratio * 0.14f),
+                        radius = r * (0.28f + ratio * 0.34f),
                         center = Offset(pos.x, pos.y)
                     )
+                    idx++
                 }
             }
 
-            // 1. DROP SHADOW ON ARENA FLOOR
+            // 2. Ground shadow right beneath ball
             drawOval(
-                color = Color.Black.copy(alpha = 0.42f),
-                topLeft = Offset(center.x - r * 0.85f, center.y + r * 0.65f),
-                size = Size(r * 1.7f, r * 0.52f)
+                color = Color.Black.copy(alpha = 0.36f),
+                topLeft = Offset(center.x - r * 0.80f, center.y + r * 0.70f),
+                size = Size(r * 1.60f, r * 0.40f)
             )
 
-            // 2. KI / CURSED AURA FLARE
-            drawAura(ball, center, r, renderMode, globalTime)
-
-            // 3. CAPE / VERLET HAIR BEHIND SPHERE
-            if (ball.character.id == "one_punch") {
-                drawHeroCape(ball, center, r, globalTime)
+            // 3. Aura halo
+            val pulse = 1f + sin(globalTime * 8f) * 0.05f
+            val auraColor = when {
+                isUlt && char.id == "kakarot_z" -> Color(0xFF38BDF8)
+                isUlt && char.id == "kamado_sun" -> Color(0xFFF97316)
+                isUlt && char.id == "mugiwara_joy" -> Color.White
+                else -> char.auraColor
             }
-            if (physicsMesh == PhysicsMesh.DYNAMIC && ball.hairNodes.isNotEmpty()) {
-                drawVerletAnimeHair(ball, center, r)
+            val outerAuraR = r * (if (isUlt) 1.44f else 1.16f) * pulse
+            drawCircle(
+                color = auraColor.copy(alpha = if (isUlt) 0.26f else 0.12f),
+                radius = outerAuraR,
+                center = center
+            )
+            if (isUlt) {
+                drawCircle(
+                    color = auraColor.copy(alpha = 0.65f),
+                    radius = outerAuraR,
+                    center = center,
+                    style = Stroke(width = 2.8f)
+                )
             }
 
-            // 4. SQUASH & STRETCH CEL-SHADED SPHERE BODY
+            // 4. Unified local transform with explicit pivot = Offset.Zero!
             val rotDeg = Math.toDegrees(ball.deformAngle.toDouble()).toFloat()
+            val useElastic = physicsMesh == PhysicsMesh.DYNAMIC
+            val sx = if (useElastic) ball.stretchFactor.coerceIn(0.86f, 1.15f) else 1f
+            val sy = if (useElastic) ball.squashFactor.coerceIn(0.86f, 1.15f) else 1f
+            val hairSway = (-ball.velocity.x / 3200f).coerceIn(-0.14f, 0.14f)
+
             withTransform({
                 translate(center.x, center.y)
-                rotate(rotDeg)
-                scale(scaleX = ball.stretchFactor, scaleY = ball.squashFactor, pivot = Offset.Zero)
-                rotate(-rotDeg)
+                if (useElastic && (sx != 1f || sy != 1f)) {
+                    rotate(rotDeg, pivot = Offset.Zero)
+                    scale(scaleX = sx, scaleY = sy, pivot = Offset.Zero)
+                    rotate(-rotDeg, pivot = Offset.Zero)
+                }
             }) {
-                drawCelShadedSphere(ball, Offset.Zero, r, renderMode, globalTime)
+                drawCharacterCrownAndBack(
+                    char = char,
+                    r = r,
+                    swayRad = hairSway,
+                    isUlt = isUlt
+                )
+                drawCharacterSphereCore(
+                    char = char,
+                    r = r,
+                    isUlt = isUlt,
+                    isSerious = ball.isSeriousActive,
+                    hitFlash = ball.hitFlashTimer
+                )
             }
 
-            // 5. ORBITING CANON WEAPON + SLASH ARC
-            drawOrbitingWeapon(ball, center, r, globalTime)
-
-            // 6. STATUS OVERLAYS (Stun, Bleed, Barrier)
-            drawStatusEffects(ball, center, r, globalTime)
-        }
-    }
-
-    private fun DrawScope.drawHeroCape(ball: CombatBall, center: Offset, radius: Float, globalTime: Float) {
-        val vel = ball.velocity
-        val dirAngle = if (vel.length() > 30f) atan2(-vel.y, -vel.x) else (PI.toFloat() * 0.5f)
-        val flutter = sin(globalTime * 11f) * 0.18f
-        val tipDist = radius * 1.85f
-        val leftShoulder = Offset(
-            center.x + cos(dirAngle - 0.9f) * radius * 0.75f,
-            center.y + sin(dirAngle - 0.9f) * radius * 0.75f
-        )
-        val rightShoulder = Offset(
-            center.x + cos(dirAngle + 0.9f) * radius * 0.75f,
-            center.y + sin(dirAngle + 0.9f) * radius * 0.75f
-        )
-        val tipLeft = Offset(
-            center.x + cos(dirAngle - 0.38f + flutter) * tipDist,
-            center.y + sin(dirAngle - 0.38f + flutter) * tipDist
-        )
-        val tipRight = Offset(
-            center.x + cos(dirAngle + 0.38f + flutter) * tipDist,
-            center.y + sin(dirAngle + 0.38f + flutter) * tipDist
-        )
-        val cape = Path().apply {
-            moveTo(leftShoulder.x, leftShoulder.y)
-            lineTo(tipLeft.x, tipLeft.y)
-            lineTo(tipRight.x, tipRight.y)
-            lineTo(rightShoulder.x, rightShoulder.y)
-            close()
-        }
-        drawPath(cape, color = Color(0xFFE53935))
-        drawPath(cape, color = Color(0xFF1A0D12), style = Stroke(width = 3f))
-    }
-
-    private fun DrawScope.drawAura(
-        ball: CombatBall,
-        center: Offset,
-        radius: Float,
-        renderMode: RenderMode,
-        globalTime: Float
-    ) {
-        val isUlt = ball.isUltimateActive
-        val pulse = sin(globalTime * 9f) * 0.12f + 1.0f
-        val auraColor = when {
-            isUlt && ball.character.id == "saiyan_spirit" -> Color(0xFF00F0FF)
-            isUlt && ball.character.id == "demon_slash" -> Color(0xFFFF5E1A)
-            else -> ball.character.auraColor
-        }
-
-        val auraRadius = radius * (if (isUlt) 1.72f else 1.32f) * pulse
-
-        if (renderMode == RenderMode.PIXELIZED) {
-            drawCircle(
-                color = auraColor.copy(alpha = if (isUlt) 0.75f else 0.42f),
-                radius = auraRadius,
+            // 5. Tightly orbiting signature weapon (also fixed with pivot = Offset.Zero)
+            WeaponRenderer.drawWeapon(
+                scope = this,
+                character = char,
                 center = center,
-                style = Stroke(width = 4f)
+                radius = r,
+                angle = ball.weaponAngle,
+                isUltimateActive = isUlt,
+                spinBurst = ball.weaponSpinBurst
+            )
+
+            // 6. Status rings
+            drawStatusOverlays(ball, center, r, globalTime)
+        }
+    }
+
+    /**
+     * Drawn in local sphere space centered at Offset.Zero so crowns/hats/hair/capes stay 100% locked to the ball.
+     */
+    private fun DrawScope.drawCharacterCrownAndBack(
+        char: CharacterData,
+        r: Float,
+        swayRad: Float,
+        isUlt: Boolean
+    ) {
+        // Saitama's white hero cape attached directly behind shoulders
+        if (char.id == "caped_baldy") {
+            sharedPath.reset()
+            sharedPath.moveTo(-r * 0.72f, r * 0.20f)
+            sharedPath.lineTo(-r * 0.92f + swayRad * r * 1.4f, r * 1.24f)
+            sharedPath.lineTo(r * 0.92f + swayRad * r * 1.4f, r * 1.24f)
+            sharedPath.lineTo(r * 0.72f, r * 0.20f)
+            sharedPath.close()
+            drawPath(sharedPath, Color(0xFFF8FAFC))
+            drawPath(sharedPath, inkColor, style = Stroke(width = 2.4f, join = StrokeJoin.Round))
+            return
+        }
+
+        // Luffy's Straw Hat locked onto top crown
+        if (char.id == "mugiwara_joy" && !isUlt) {
+            val brimY = -r * 0.72f
+            drawOval(
+                color = Color(0xFFFACC15),
+                topLeft = Offset(-r * 1.04f, brimY - r * 0.20f),
+                size = Size(r * 2.08f, r * 0.40f)
+            )
+            drawOval(
+                color = inkColor,
+                topLeft = Offset(-r * 1.04f, brimY - r * 0.20f),
+                size = Size(r * 2.08f, r * 0.40f),
+                style = Stroke(width = 2.4f)
+            )
+            drawArc(
+                color = Color(0xFFFACC15),
+                startAngle = 180f,
+                sweepAngle = 180f,
+                useCenter = true,
+                topLeft = Offset(-r * 0.60f, brimY - r * 0.54f),
+                size = Size(r * 1.20f, r * 0.86f)
+            )
+            drawLine(
+                color = Color(0xFFDC2626),
+                start = Offset(-r * 0.56f, brimY - r * 0.12f),
+                end = Offset(r * 0.56f, brimY - r * 0.12f),
+                strokeWidth = r * 0.13f,
+                cap = StrokeCap.Round
             )
             return
         }
 
-        drawCircle(
-            brush = Brush.radialGradient(
-                colors = listOf(
-                    auraColor.copy(alpha = if (isUlt) 0.78f else 0.38f),
-                    auraColor.copy(alpha = if (isUlt) 0.32f else 0.12f),
-                    Color.Transparent
-                ),
-                center = center,
-                radius = auraRadius
-            ),
-            radius = auraRadius,
-            center = center
-        )
+        // Frieren's elf ears & twin-tails locked to sides
+        if (char.id == "frieren_zoltraak") {
+            for (side in intArrayOf(-1, 1)) {
+                sharedPath.reset()
+                sharedPath.moveTo(side * r * 0.84f, -r * 0.12f)
+                sharedPath.lineTo(side * r * 1.28f, -r * 0.22f)
+                sharedPath.lineTo(side * r * 0.86f, r * 0.12f)
+                sharedPath.close()
+                drawPath(sharedPath, Color(0xFFFDE68A))
+                drawPath(sharedPath, inkColor, style = Stroke(width = 2f))
 
-        if (isUlt || renderMode == RenderMode.REALISTIC) {
-            val count = if (isUlt) 8 else 4
-            for (i in 0 until count) {
-                val a = globalTime * (if (isUlt) 6f else 3f) + (i * 2f * PI.toFloat() / count)
-                val dist = radius * (1.18f + (i % 2) * 0.18f)
-                drawCircle(
-                    color = if (i % 2 == 0) Color.White else auraColor,
-                    radius = radius * (if (isUlt) 0.11f else 0.06f),
-                    center = Offset(center.x + cos(a) * dist, center.y + sin(a) * dist)
-                )
+                sharedPath.reset()
+                sharedPath.moveTo(side * r * 0.64f, -r * 0.54f)
+                sharedPath.lineTo(side * r * 1.40f + swayRad * r * 0.6f, r * 0.34f)
+                sharedPath.lineTo(side * r * 0.92f + swayRad * r * 0.4f, r * 0.52f)
+                sharedPath.close()
+                drawPath(sharedPath, Color(0xFFE2E8F0))
+                drawPath(sharedPath, inkColor, style = Stroke(width = 2.2f, join = StrokeJoin.Round))
             }
+            return
         }
-    }
 
-    private fun DrawScope.drawVerletAnimeHair(
-        ball: CombatBall,
-        center: Offset,
-        radius: Float
-    ) {
-        val char = ball.character
-        if (char.hairColor.alpha == 0f || ball.hairNodes.size < 3) return
+        // Alucard's crimson fedora brim
+        if (char.id == "alucard_hellsing") {
+            val hatY = -r * 0.74f
+            drawOval(
+                color = Color(0xFF991B1B),
+                topLeft = Offset(-r * 1.14f, hatY - r * 0.18f),
+                size = Size(r * 2.28f, r * 0.36f)
+            )
+            drawOval(
+                color = inkColor,
+                topLeft = Offset(-r * 1.14f, hatY - r * 0.18f),
+                size = Size(r * 2.28f, r * 0.36f),
+                style = Stroke(width = 2.4f)
+            )
+            return
+        }
+
+        // Jotaro's gakuran cap crown
+        if (char.id == "kujo_star") {
+            drawRoundRect(
+                color = Color(0xFF18181B),
+                topLeft = Offset(-r * 0.74f, -r * 1.04f),
+                size = Size(r * 1.48f, r * 0.48f),
+                cornerRadius = CornerRadius(8f, 8f)
+            )
+            drawCircle(Color(0xFFFACC15), radius = r * 0.12f, center = Offset(-r * 0.24f, -r * 0.82f))
+            return
+        }
+
+        // Mob's signature bowl-cut (rises into spikes during ???% Ultimate)
+        if (char.id == "kageyama_esper" && !isUlt) {
+            drawArc(
+                color = Color(0xFF09090B),
+                startAngle = 185f,
+                sweepAngle = 170f,
+                useCenter = true,
+                topLeft = Offset(-r * 1.04f, -r * 1.06f),
+                size = Size(r * 2.08f, r * 1.36f)
+            )
+            return
+        }
+
+        if (char.hairColor.alpha == 0f) return
 
         val hairColor = when {
-            ball.isUltimateActive && char.id == "saiyan_spirit" -> Color(0xFF00F0FF)
-            ball.isUltimateActive && char.id == "demon_slash" -> Color(0xFFFF5E1A)
-            ball.isUltimateActive && char.id == "rubber_stretch" -> Color.White
+            isUlt && char.id == "kakarot_z" -> Color(0xFF38BDF8)
+            isUlt && char.id == "mugiwara_joy" -> Color.White
+            isUlt && char.id == "kageyama_esper" -> Color(0xFF18181B)
             else -> char.hairColor
         }
 
-        val tip = ball.hairNodes.last()
-        val mid = ball.hairNodes[ball.hairNodes.size / 2]
-        val dx = tip.x - center.x
-        val dy = tip.y - center.y
-        val baseAngle = atan2(dy, dx)
+        val crownCenterAngle = -PI.toFloat() * 0.5f + swayRad
+        val spikeOffsets = if (char.id == "kakarot_z") {
+            floatArrayOf(-0.82f, -0.46f, -0.14f, 0.20f, 0.56f, 0.88f)
+        } else {
+            floatArrayOf(-0.58f, -0.27f, 0f, 0.27f, 0.58f)
+        }
+        val spikeScale = if (char.id == "kakarot_z") 1.50f else 1.34f
 
-        // Draw 5 spiky cel-shaded anime hair locks fanning around the Verlet trail axis
-        val lockAngles = floatArrayOf(-0.62f, -0.30f, 0f, 0.30f, 0.62f)
-        val lockLengths = floatArrayOf(0.82f, 1.05f, 1.22f, 1.05f, 0.82f)
-
-        for (i in lockAngles.indices) {
-            val angle = baseAngle + lockAngles[i]
-            val lenScale = lockLengths[i]
-            val spikeTip = Offset(
-                center.x + (dx * lenScale) + cos(angle) * radius * 0.55f,
-                center.y + (dy * lenScale) + sin(angle) * radius * 0.55f
+        for (offset in spikeOffsets) {
+            val a = crownCenterAngle + offset
+            sharedPath.reset()
+            sharedPath.moveTo(
+                cos(a - 0.28f) * r * 0.78f,
+                sin(a - 0.28f) * r * 0.78f
             )
-            val rootLeft = Offset(
-                center.x + cos(angle - 0.36f) * radius * 0.78f,
-                center.y + sin(angle - 0.36f) * radius * 0.78f
+            sharedPath.lineTo(
+                cos(a) * r * spikeScale,
+                sin(a) * r * spikeScale
             )
-            val rootRight = Offset(
-                center.x + cos(angle + 0.36f) * radius * 0.78f,
-                center.y + sin(angle + 0.36f) * radius * 0.78f
+            sharedPath.lineTo(
+                cos(a + 0.28f) * r * 0.78f,
+                sin(a + 0.28f) * r * 0.78f
             )
-            val ctrl = Offset(
-                (mid.x + spikeTip.x) * 0.5f,
-                (mid.y + spikeTip.y) * 0.5f
-            )
-
-            val spike = Path().apply {
-                moveTo(rootLeft.x, rootLeft.y)
-                quadraticBezierTo(ctrl.x, ctrl.y, spikeTip.x, spikeTip.y)
-                lineTo(rootRight.x, rootRight.y)
-                close()
-            }
-
-            drawPath(spike, color = hairColor)
-            drawPath(
-                spike,
-                color = Color(0xFF0A0C14),
-                style = Stroke(width = (radius * 0.065f).coerceAtLeast(2f), join = StrokeJoin.Round)
-            )
+            sharedPath.close()
+            drawPath(sharedPath, hairColor)
+            drawPath(sharedPath, inkColor, style = Stroke(width = (r * 0.06f).coerceAtLeast(2f), join = StrokeJoin.Round))
         }
     }
 
-    private fun DrawScope.drawCelShadedSphere(
-        ball: CombatBall,
-        center: Offset,
-        radius: Float,
-        renderMode: RenderMode,
-        globalTime: Float
+    /**
+     * Drawn in local sphere space centered at Offset.Zero.
+     */
+    private fun DrawScope.drawCharacterSphereCore(
+        char: CharacterData,
+        r: Float,
+        isUlt: Boolean,
+        isSerious: Boolean,
+        hitFlash: Float
     ) {
-        val char = ball.character
-        val isUlt = ball.isUltimateActive
-        val bodyColor = if (isUlt && char.id == "rubber_stretch") Color(0xFFF5F7FF) else char.primaryColor
+        val baseColor = if (isUlt && char.id == "mugiwara_joy") Color(0xFFF8FAFC) else char.primaryColor
 
-        // Base cel-shaded gradient sphere
-        drawCircle(
-            brush = Brush.radialGradient(
-                colors = listOf(
-                    Color.White.copy(alpha = 0.72f),
-                    bodyColor,
-                    char.secondaryColor
-                ),
-                center = Offset(center.x - radius * 0.32f, center.y - radius * 0.35f),
-                radius = radius * 1.38f
-            ),
-            radius = radius,
-            center = center
+        // 1. Cel-shaded base + lower shadow crescent + soft specular highlight
+        drawCircle(color = baseColor, radius = r, center = Offset.Zero)
+        drawArc(
+            color = char.secondaryColor.copy(alpha = 0.55f),
+            startAngle = 15f,
+            sweepAngle = 150f,
+            useCenter = true,
+            topLeft = Offset(-r, -r * 0.85f),
+            size = Size(r * 2f, r * 1.85f)
+        )
+        drawOval(
+            color = Color.White.copy(alpha = 0.36f),
+            topLeft = Offset(-r * 0.56f, -r * 0.70f),
+            size = Size(r * 0.48f, r * 0.25f)
         )
 
-        // Signature Archetype Markings & Expressive Shonen Eyes
+        // 2. Character-specific anime details
         when (char.id) {
-            "saiyan_spirit" -> {
-                // Blue martial arts sash across lower torso
-                drawArc(
-                    color = Color(0xFF1565C0),
-                    startAngle = 22f,
-                    sweepAngle = 136f,
-                    useCenter = false,
-                    topLeft = Offset(center.x - radius * 0.82f, center.y - radius * 0.65f),
-                    size = Size(radius * 1.64f, radius * 1.48f),
-                    style = Stroke(width = radius * 0.24f, cap = StrokeCap.Round)
-                )
-                drawAnimeScowlEyes(center, radius, eyeColor = if (isUlt) Color(0xFF00F0FF) else Color(0xFF11131D))
+            "kakarot_z" -> {
+                drawLine(Color(0xFF1D4ED8), Offset(-r * 0.54f, r * 0.44f), Offset(r * 0.54f, r * 0.44f), strokeWidth = r * 0.19f, cap = StrokeCap.Round)
+                drawScowlEyes(r, if (isUlt) Color(0xFF38BDF8) else inkColor)
             }
 
-            "demon_slash" -> {
-                // Checkered green/black lower band
-                val sq = radius * 0.34f
+            "kamado_sun" -> {
+                val sq = r * 0.29f
                 for (col in -2..1) {
                     if (col % 2 == 0) {
-                        drawRect(
-                            color = Color(0xFF12151C),
-                            topLeft = Offset(center.x + col * sq, center.y + radius * 0.24f),
-                            size = Size(sq, sq * 0.85f)
-                        )
+                        drawRect(inkColor, Offset(col * sq, r * 0.32f), Size(sq, sq * 0.68f))
                     }
                 }
-                // Crimson mark on upper-left brow
-                drawLine(
-                    color = Color(0xFFB71C1C),
-                    start = Offset(center.x - radius * 0.52f, center.y - radius * 0.52f),
-                    end = Offset(center.x - radius * 0.22f, center.y - radius * 0.36f),
-                    strokeWidth = radius * 0.10f,
-                    cap = StrokeCap.Round
-                )
-                drawAnimeScowlEyes(center, radius, eyeColor = Color(0xFFD50000))
+                drawLine(Color(0xFF991B1B), Offset(-r * 0.50f, -r * 0.52f), Offset(-r * 0.20f, -r * 0.36f), strokeWidth = r * 0.10f, cap = StrokeCap.Round)
+                for (side in intArrayOf(-1, 1)) {
+                    drawRect(Color.White, Offset(side * r * 0.82f - r * 0.07f, r * 0.05f), Size(r * 0.14f, r * 0.28f))
+                    drawCircle(Color(0xFFDC2626), radius = r * 0.045f, center = Offset(side * r * 0.82f, r * 0.13f))
+                }
+                drawScowlEyes(r, Color(0xFF991B1B))
             }
 
-            "six_glow_magic" -> {
-                // Jet-black jujutsu blindfold + glowing cyan Six-Eyes slit
+            "raikiri_shinobi" -> {
+                drawArc(Color(0xFF0F172A), 8f, 164f, true, Offset(-r * 0.95f, -r * 0.84f), Size(r * 1.90f, r * 1.78f))
+                drawRoundRect(Color(0xFFCBD5E1), Offset(-r * 0.65f, -r * 0.62f), Size(r * 1.30f, r * 0.28f), CornerRadius(6f, 6f))
+                val lx = -r * 0.32f
+                val rx = r * 0.32f
+                val ey = -r * 0.05f
+                drawLine(Color(0xFF991B1B), Offset(lx, ey - r * 0.26f), Offset(lx, ey + r * 0.24f), strokeWidth = 2.4f)
+                drawOval(Color.White, Offset(lx - r * 0.16f, ey - r * 0.11f), Size(r * 0.32f, r * 0.22f))
+                drawCircle(Color(0xFFEF4444), r * 0.09f, Offset(lx, ey))
+                drawOval(Color.White, Offset(rx - r * 0.16f, ey - r * 0.11f), Size(r * 0.32f, r * 0.22f))
+                drawCircle(inkColor, r * 0.08f, Offset(rx, ey))
+            }
+
+            "mugiwara_joy" -> {
+                drawScowlEyes(r, if (isUlt) Color(0xFFEF4444) else inkColor)
+                drawLine(inkColor, Offset(-r * 0.45f, r * 0.14f), Offset(-r * 0.18f, r * 0.18f), strokeWidth = 2f)
+                drawArc(Color.White, 15f, 150f, true, Offset(-r * 0.40f, r * 0.06f), Size(r * 0.80f, r * 0.44f))
+                drawArc(inkColor, 15f, 150f, true, Offset(-r * 0.40f, r * 0.06f), Size(r * 0.80f, r * 0.44f), style = Stroke(width = 2f))
+            }
+
+            "satoru_void" -> {
                 drawRoundRect(
-                    color = Color(0xFF0B0D17),
-                    topLeft = Offset(center.x - radius * 0.94f, center.y - radius * 0.32f),
-                    size = Size(radius * 1.88f, radius * 0.56f),
-                    cornerRadius = CornerRadius(radius * 0.16f, radius * 0.16f)
+                    color = Color(0xFF09090B),
+                    topLeft = Offset(-r * 0.93f, -r * 0.28f),
+                    size = Size(r * 1.86f, r * 0.50f),
+                    cornerRadius = CornerRadius(r * 0.14f, r * 0.14f)
                 )
-                val eyeGlow = if (isUlt) 1f else (0.65f + sin(globalTime * 6f) * 0.25f)
-                drawCircle(
-                    color = Color(0xFF00F0FF).copy(alpha = eyeGlow),
-                    radius = radius * 0.13f,
-                    center = Offset(center.x - radius * 0.32f, center.y - radius * 0.04f)
-                )
-                drawCircle(
-                    color = Color(0xFF00F0FF).copy(alpha = eyeGlow),
-                    radius = radius * 0.13f,
-                    center = Offset(center.x + radius * 0.32f, center.y - radius * 0.04f)
-                )
+                drawCircle(Color(0xFF38BDF8), r * 0.13f, Offset(-r * 0.32f, -r * 0.03f))
+                drawCircle(Color(0xFF38BDF8), r * 0.13f, Offset(r * 0.32f, -r * 0.03f))
+                drawCircle(Color.White, r * 0.05f, Offset(-r * 0.32f, -r * 0.03f))
+                drawCircle(Color.White, r * 0.05f, Offset(r * 0.32f, -r * 0.03f))
             }
 
-            "lightning_ninja" -> {
-                // Ninja dark mask on lower half
+            "roronoa_ashura" -> {
+                val lx = -r * 0.32f
+                val rx = r * 0.32f
+                val ey = -r * 0.04f
+                drawLine(inkColor, Offset(lx - r * 0.18f, ey), Offset(lx + r * 0.18f, ey), strokeWidth = 3f, cap = StrokeCap.Round)
+                drawLine(Color(0xFF7F1D1D), Offset(lx - r * 0.04f, ey - r * 0.26f), Offset(lx + r * 0.04f, ey + r * 0.26f), strokeWidth = 2.4f)
+                drawOval(Color.White, Offset(rx - r * 0.18f, ey - r * 0.12f), Size(r * 0.36f, r * 0.24f))
+                drawCircle(if (isUlt) Color(0xFFEF4444) else inkColor, r * 0.09f, Offset(rx, ey))
+                for (e in 0..2) {
+                    drawCircle(Color(0xFFFACC15), r * 0.05f, Offset(-r * 0.86f, r * (0.04f + e * 0.12f)))
+                }
+            }
+
+            "chainsaw_devil" -> {
+                sharedPath.reset()
+                sharedPath.moveTo(-r * 0.13f, -r * 0.20f)
+                sharedPath.lineTo(0f, -r * 1.40f)
+                sharedPath.lineTo(r * 0.13f, -r * 0.20f)
+                sharedPath.close()
+                drawPath(sharedPath, Color(0xFFE4E4E7))
+                drawPath(sharedPath, inkColor, style = Stroke(width = 2.4f))
+                drawScowlEyes(r, Color(0xFFFACC15))
+                drawRoundRect(Color.White, Offset(-r * 0.44f, r * 0.24f), Size(r * 0.88f, r * 0.22f), CornerRadius(4f, 4f))
+                for (t in -2..2) {
+                    val tx = t * r * 0.15f
+                    drawLine(inkColor, Offset(tx, r * 0.24f), Offset(tx, r * 0.46f), strokeWidth = 2f)
+                }
+            }
+
+            "dragneel_ignis" -> {
+                drawRoundRect(Color(0xFFF8FAFC), Offset(-r * 0.80f, r * 0.28f), Size(r * 1.60f, r * 0.34f), CornerRadius(8f, 8f))
+                for (c in -2..2) {
+                    drawLine(Color(0xFF94A3B8), Offset(c * r * 0.25f, r * 0.28f), Offset(c * r * 0.25f, r * 0.62f), strokeWidth = 1.8f)
+                }
+                drawScowlEyes(r, Color(0xFFD97706))
+            }
+
+            "elric_fullmetal" -> {
+                drawCircle(Color(0xFFD4D4D8), r * 0.20f, Offset(r * 0.60f, r * 0.36f))
+                drawCircle(inkColor, r * 0.055f, Offset(r * 0.60f, r * 0.36f))
+                drawScowlEyes(r, Color(0xFFEAB308))
+            }
+
+            "asta_grimoire" -> {
+                drawRoundRect(Color(0xFF18181B), Offset(-r * 0.84f, -r * 0.56f), Size(r * 1.68f, r * 0.28f), CornerRadius(6f, 6f))
+                drawCircle(Color(0xFFDC2626), r * 0.10f, Offset(-r * 0.40f, -r * 0.42f))
+                drawScowlEyes(r, if (isUlt) Color(0xFFEF4444) else Color(0xFF16A34A))
+            }
+
+            "kurosaki_hollow" -> {
                 drawArc(
-                    color = Color(0xFF1A2234),
-                    startAngle = 8f,
-                    sweepAngle = 164f,
+                    color = Color(0xFFF8FAFC),
+                    startAngle = 90f,
+                    sweepAngle = 180f,
                     useCenter = true,
-                    topLeft = Offset(center.x - radius * 0.96f, center.y - radius * 0.90f),
-                    size = Size(radius * 1.92f, radius * 1.86f)
+                    topLeft = Offset(-r * 0.95f, -r * 0.95f),
+                    size = Size(r * 1.90f, r * 1.90f)
                 )
-                // Metallic ninja forehead plate
-                drawRoundRect(
-                    color = Color(0xFFB0BEC5),
-                    topLeft = Offset(center.x - radius * 0.68f, center.y - radius * 0.68f),
-                    size = Size(radius * 1.36f, radius * 0.34f),
-                    cornerRadius = CornerRadius(6f, 6f)
-                )
-                drawAnimeScowlEyes(center, radius, eyeColor = Color(0xFF00F0FF))
+                drawLine(Color(0xFFDC2626), Offset(-r * 0.52f, -r * 0.62f), Offset(-r * 0.34f, r * 0.52f), strokeWidth = r * 0.10f, cap = StrokeCap.Round)
+                drawScowlEyes(r, Color(0xFFFACC15))
             }
 
-            "one_punch" -> {
-                // Iconic deadpan vs serious eyes!
-                if (isUlt || ball.isSeriousActive) {
-                    drawAnimeScowlEyes(center, radius, eyeColor = Color(0xFFFF1E42))
-                } else {
-                    // Deadpan oval eyes
-                    drawCircle(Color.White, radius * 0.19f, Offset(center.x - radius * 0.30f, center.y - radius * 0.05f))
-                    drawCircle(Color.White, radius * 0.19f, Offset(center.x + radius * 0.30f, center.y - radius * 0.05f))
-                    drawCircle(Color.Black, radius * 0.06f, Offset(center.x - radius * 0.30f, center.y - radius * 0.05f))
-                    drawCircle(Color.Black, radius * 0.06f, Offset(center.x + radius * 0.30f, center.y - radius * 0.05f))
-                }
-                // Specular dome shine
-                drawCircle(
-                    color = Color.White.copy(alpha = 0.85f),
-                    radius = radius * 0.20f,
-                    center = Offset(center.x - radius * 0.36f, center.y - radius * 0.45f)
-                )
-            }
-
-            else -> {
-                drawAnimeScowlEyes(center, radius, eyeColor = Color(0xFF11131D))
-            }
-        }
-
-        // Hit impact white flash overlay
-        if (ball.hitFlashTimer > 0f) {
-            drawCircle(
-                color = Color.White.copy(alpha = (ball.hitFlashTimer * 0.65f).coerceIn(0f, 0.7f)),
-                radius = radius,
-                center = center
-            )
-        }
-
-        // Crisp Manga Ink Rim Outline
-        drawCircle(
-            color = if (isUlt) Color.White else Color(0xFF090B14),
-            radius = radius,
-            center = center,
-            style = Stroke(width = (radius * 0.085f).coerceAtLeast(3f))
-        )
-    }
-
-    private fun DrawScope.drawAnimeScowlEyes(center: Offset, radius: Float, eyeColor: Color) {
-        val eyeY = center.y - radius * 0.04f
-        val leftX = center.x - radius * 0.32f
-        val rightX = center.x + radius * 0.32f
-
-        // Sclera
-        drawOval(
-            color = Color.White,
-            topLeft = Offset(leftX - radius * 0.18f, eyeY - radius * 0.13f),
-            size = Size(radius * 0.36f, radius * 0.25f)
-        )
-        drawOval(
-            color = Color.White,
-            topLeft = Offset(rightX - radius * 0.18f, eyeY - radius * 0.13f),
-            size = Size(radius * 0.36f, radius * 0.25f)
-        )
-        // Iris
-        drawCircle(eyeColor, radius * 0.09f, Offset(leftX + radius * 0.02f, eyeY))
-        drawCircle(eyeColor, radius * 0.09f, Offset(rightX - radius * 0.02f, eyeY))
-
-        // Angled fierce eyebrows
-        drawLine(
-            color = Color(0xFF090B14),
-            start = Offset(leftX - radius * 0.22f, eyeY - radius * 0.20f),
-            end = Offset(leftX + radius * 0.18f, eyeY - radius * 0.09f),
-            strokeWidth = (radius * 0.08f).coerceAtLeast(2.5f),
-            cap = StrokeCap.Round
-        )
-        drawLine(
-            color = Color(0xFF090B14),
-            start = Offset(rightX + radius * 0.22f, eyeY - radius * 0.20f),
-            end = Offset(rightX - radius * 0.18f, eyeY - radius * 0.09f),
-            strokeWidth = (radius * 0.08f).coerceAtLeast(2.5f),
-            cap = StrokeCap.Round
-        )
-    }
-
-    private fun DrawScope.drawOrbitingWeapon(
-        ball: CombatBall,
-        center: Offset,
-        radius: Float,
-        globalTime: Float
-    ) {
-        val angle = ball.weaponAngle
-        val orbitDist = radius * 1.38f
-        val weaponPos = Offset(
-            center.x + cos(angle) * orbitDist,
-            center.y + sin(angle) * orbitDist
-        )
-
-        // Draw slash arc trail when spinning rapidly on hit/launch
-        if (ball.weaponSpinBurst > 2f) {
-            val deg = Math.toDegrees(angle.toDouble()).toFloat()
-            drawArc(
-                color = ball.character.auraColor.copy(alpha = 0.65f),
-                startAngle = deg - 110f,
-                sweepAngle = 110f,
-                useCenter = false,
-                topLeft = Offset(center.x - orbitDist, center.y - orbitDist),
-                size = Size(orbitDist * 2f, orbitDist * 2f),
-                style = Stroke(width = radius * 0.14f, cap = StrokeCap.Round)
-            )
-        }
-
-        val scaleUnit = radius * 0.32f
-        when (ball.character.weaponType) {
-            WeaponVisualType.KATANA_SHEATH -> {
-                val rot = Math.toDegrees(angle.toDouble()).toFloat() + 90f
-                withTransform({
-                    translate(weaponPos.x, weaponPos.y)
-                    rotate(rot)
-                }) {
-                    drawLine(
-                        color = if (ball.isUltimateActive) Color(0xFFFF5E1A) else Color(0xFF00F0FF),
-                        start = Offset(0f, -scaleUnit * 1.7f),
-                        end = Offset(0f, scaleUnit * 0.9f),
-                        strokeWidth = scaleUnit * 0.32f,
-                        cap = StrokeCap.Round
-                    )
-                    drawLine(
-                        color = Color(0xFFFFC800),
-                        start = Offset(-scaleUnit * 0.55f, scaleUnit * 0.9f),
-                        end = Offset(scaleUnit * 0.55f, scaleUnit * 0.9f),
-                        strokeWidth = scaleUnit * 0.25f
-                    )
-                    drawLine(
-                        color = Color(0xFF1A1D2B),
-                        start = Offset(0f, scaleUnit * 0.9f),
-                        end = Offset(0f, scaleUnit * 1.65f),
-                        strokeWidth = scaleUnit * 0.28f,
-                        cap = StrokeCap.Round
-                    )
-                }
-            }
-
-            WeaponVisualType.ENERGY_RINGS -> {
-                val c = if (ball.isUltimateActive) Color(0xFF00F0FF) else Color(0xFFFFC800)
-                drawCircle(c, radius = scaleUnit * 0.85f, center = weaponPos, style = Stroke(width = scaleUnit * 0.28f))
-                drawCircle(Color.White, radius = scaleUnit * 0.36f, center = weaponPos)
-            }
-
-            WeaponVisualType.MAGIC_ORBS -> {
-                val oppPos = Offset(
-                    center.x + cos(angle + PI.toFloat()) * orbitDist,
-                    center.y + sin(angle + PI.toFloat()) * orbitDist
-                )
-                drawCircle(
-                    brush = Brush.radialGradient(listOf(Color.White, Color(0xFFFF1E42)), weaponPos, scaleUnit * 0.85f),
-                    radius = scaleUnit * 0.85f,
-                    center = weaponPos
-                )
-                drawCircle(
-                    brush = Brush.radialGradient(listOf(Color.White, Color(0xFF00B0FF)), oppPos, scaleUnit * 0.85f),
-                    radius = scaleUnit * 0.85f,
-                    center = oppPos
-                )
-            }
-
-            WeaponVisualType.ELECTRIC_KUNAI -> {
-                val rot = Math.toDegrees(angle.toDouble()).toFloat() + 90f
-                withTransform({
-                    translate(weaponPos.x, weaponPos.y)
-                    rotate(rot)
-                }) {
-                    val kunai = Path().apply {
-                        moveTo(0f, -scaleUnit * 1.4f)
-                        lineTo(scaleUnit * 0.55f, 0f)
-                        lineTo(0f, scaleUnit * 0.35f)
-                        lineTo(-scaleUnit * 0.55f, 0f)
-                        close()
+            "yeager_titan" -> {
+                drawScowlEyes(r, Color(0xFF10B981))
+                for (side in intArrayOf(-1, 1)) {
+                    for (m in -1..1) {
+                        val mx = side * r * 0.32f + m * r * 0.08f
+                        drawLine(Color(0xFF7C2D12), Offset(mx, r * 0.14f), Offset(mx, r * 0.32f), strokeWidth = 2f)
                     }
-                    drawPath(kunai, Color(0xFFECEFF1))
-                    drawCircle(Color(0xFF00F0FF), radius = scaleUnit * 0.32f, center = Offset(0f, scaleUnit * 0.72f), style = Stroke(width = 2.5f))
                 }
             }
 
-            WeaponVisualType.BOXING_GLOVE, WeaponVisualType.RUBBER_FIST -> {
-                drawCircle(Color(0xFFE53935), radius = scaleUnit * 0.95f, center = weaponPos)
-                drawCircle(Color(0xFF0D0F18), radius = scaleUnit * 0.95f, center = weaponPos, style = Stroke(width = 2.5f))
-                drawCircle(Color.White.copy(alpha = 0.75f), radius = scaleUnit * 0.30f, center = Offset(weaponPos.x - scaleUnit * 0.25f, weaponPos.y - scaleUnit * 0.25f))
+            "killua_godspeed" -> {
+                drawRoundRect(Color(0xFF1E1B4B), Offset(-r * 0.70f, r * 0.40f), Size(r * 1.40f, r * 0.34f), CornerRadius(6f, 6f))
+                drawScowlEyes(r, Color(0xFF3B82F6))
+            }
+
+            "kageyama_esper" -> {
+                if (isUlt) {
+                    drawCircle(Color.White, r * 0.17f, Offset(-r * 0.32f, -r * 0.02f))
+                    drawCircle(Color.White, r * 0.17f, Offset(r * 0.32f, -r * 0.02f))
+                } else {
+                    drawCircle(Color.White, r * 0.15f, Offset(-r * 0.30f, 0f))
+                    drawCircle(Color.White, r * 0.15f, Offset(r * 0.30f, 0f))
+                    drawCircle(inkColor, r * 0.055f, Offset(-r * 0.30f, 0f))
+                    drawCircle(inkColor, r * 0.055f, Offset(r * 0.30f, 0f))
+                }
+                drawCircle(Color(0xFFFACC15), r * 0.085f, Offset(0f, r * 0.54f))
+            }
+
+            "kujo_star" -> {
+                drawLine(Color(0xFF09090B), Offset(-r * 0.76f, -r * 0.25f), Offset(r * 0.76f, -r * 0.25f), strokeWidth = r * 0.15f)
+                drawScowlEyes(r, Color(0xFF14B8A6))
+                drawLine(Color(0xFFFACC15), Offset(-r * 0.44f, r * 0.40f), Offset(-r * 0.10f, r * 0.65f), strokeWidth = 3.2f, cap = StrokeCap.Round)
+            }
+
+            "caped_baldy" -> {
+                if (isUlt || isSerious) {
+                    drawScowlEyes(r, Color(0xFFEF4444))
+                } else {
+                    drawCircle(Color.White, r * 0.17f, Offset(-r * 0.30f, -r * 0.04f))
+                    drawCircle(Color.White, r * 0.17f, Offset(r * 0.30f, -r * 0.04f))
+                    drawCircle(inkColor, r * 0.05f, Offset(-r * 0.30f, -r * 0.04f))
+                    drawCircle(inkColor, r * 0.05f, Offset(r * 0.30f, -r * 0.04f))
+                }
+                drawCircle(Color.White, r * 0.10f, Offset(-r * 0.50f, r * 0.46f))
+                drawCircle(Color.White, r * 0.10f, Offset(r * 0.50f, r * 0.46f))
+            }
+
+            "alucard_hellsing" -> {
+                val lx = -r * 0.32f
+                val rx = r * 0.32f
+                val ey = -r * 0.04f
+                drawLine(inkColor, Offset(lx, ey), Offset(rx, ey), strokeWidth = 2.4f)
+                drawCircle(Color(0xFFF97316), r * 0.21f, Offset(lx, ey))
+                drawCircle(Color(0xFFF97316), r * 0.21f, Offset(rx, ey))
+                drawCircle(inkColor, r * 0.21f, Offset(lx, ey), style = Stroke(width = 2.2f))
+                drawCircle(inkColor, r * 0.21f, Offset(rx, ey), style = Stroke(width = 2.2f))
+                drawLine(Color.White, Offset(-r * 0.24f, r * 0.34f), Offset(r * 0.24f, r * 0.34f), strokeWidth = 2.6f, cap = StrokeCap.Round)
+            }
+
+            "sukuna_shrine" -> {
+                drawScowlEyes(r, Color(0xFFE11D48))
+                drawCircle(Color(0xFFE11D48), r * 0.065f, Offset(-r * 0.35f, r * 0.19f))
+                drawCircle(Color(0xFFE11D48), r * 0.065f, Offset(r * 0.35f, r * 0.19f))
+                drawLine(inkColor, Offset(-r * 0.46f, -r * 0.42f), Offset(r * 0.46f, -r * 0.42f), strokeWidth = 2.8f, cap = StrokeCap.Round)
+            }
+
+            "frieren_zoltraak" -> {
+                val lx = -r * 0.30f
+                val rx = r * 0.30f
+                val ey = -r * 0.02f
+                drawOval(Color(0xFF0D9488), Offset(lx - r * 0.14f, ey - r * 0.12f), Size(r * 0.28f, r * 0.24f))
+                drawOval(Color(0xFF0D9488), Offset(rx - r * 0.14f, ey - r * 0.12f), Size(r * 0.28f, r * 0.24f))
+                drawCircle(Color.White, r * 0.05f, Offset(lx - r * 0.04f, ey - r * 0.04f))
+                drawCircle(Color.White, r * 0.05f, Offset(rx - r * 0.04f, ey - r * 0.04f))
+                drawLine(Color(0xFFCA8A04), Offset(-r * 0.62f, r * 0.44f), Offset(r * 0.62f, r * 0.44f), strokeWidth = r * 0.11f, cap = StrokeCap.Round)
+                drawCircle(Color(0xFFDC2626), r * 0.10f, Offset(0f, r * 0.44f))
+            }
+
+            "jinwoo_monarch" -> {
+                val lx = -r * 0.32f
+                val rx = r * 0.32f
+                val ey = -r * 0.04f
+                drawLine(Color(0xFFA855F7), Offset(lx, ey), Offset(lx - r * 0.20f, ey - r * 0.26f), strokeWidth = 2.8f, cap = StrokeCap.Round)
+                drawLine(Color(0xFFA855F7), Offset(rx, ey), Offset(rx + r * 0.20f, ey - r * 0.26f), strokeWidth = 2.8f, cap = StrokeCap.Round)
+                drawOval(Color(0xFFC084FC), Offset(lx - r * 0.17f, ey - r * 0.10f), Size(r * 0.34f, r * 0.20f))
+                drawOval(Color(0xFFC084FC), Offset(rx - r * 0.17f, ey - r * 0.10f), Size(r * 0.34f, r * 0.20f))
+                drawCircle(Color.White, r * 0.055f, Offset(lx, ey))
+                drawCircle(Color.White, r * 0.055f, Offset(rx, ey))
             }
 
             else -> {
-                drawCircle(ball.character.auraColor, radius = scaleUnit * 0.8f, center = weaponPos)
-                drawCircle(Color.White, radius = scaleUnit * 0.35f, center = weaponPos)
+                drawScowlEyes(r, inkColor)
             }
         }
+
+        // 3. Impact flash
+        if (hitFlash > 0f) {
+            drawCircle(
+                color = Color.White.copy(alpha = (hitFlash * 0.58f).coerceIn(0f, 0.62f)),
+                radius = r,
+                center = Offset.Zero
+            )
+        }
+
+        // 4. Crisp manga rim outline
+        drawCircle(
+            color = if (isUlt) Color.White else inkColor,
+            radius = r,
+            center = Offset.Zero,
+            style = Stroke(width = (r * 0.08f).coerceAtLeast(2.5f))
+        )
     }
 
-    private fun DrawScope.drawStatusEffects(
+    private fun DrawScope.drawScowlEyes(r: Float, irisColor: Color) {
+        val eyeY = -r * 0.04f
+        val leftX = -r * 0.32f
+        val rightX = r * 0.32f
+
+        drawOval(Color.White, Offset(leftX - r * 0.17f, eyeY - r * 0.12f), Size(r * 0.34f, r * 0.23f))
+        drawOval(Color.White, Offset(rightX - r * 0.17f, eyeY - r * 0.12f), Size(r * 0.34f, r * 0.23f))
+
+        drawCircle(irisColor, r * 0.085f, Offset(leftX + r * 0.02f, eyeY))
+        drawCircle(irisColor, r * 0.085f, Offset(rightX - r * 0.02f, eyeY))
+
+        drawLine(
+            color = inkColor,
+            start = Offset(leftX - r * 0.20f, eyeY - r * 0.19f),
+            end = Offset(leftX + r * 0.17f, eyeY - r * 0.08f),
+            strokeWidth = (r * 0.075f).coerceAtLeast(2.2f),
+            cap = StrokeCap.Round
+        )
+        drawLine(
+            color = inkColor,
+            start = Offset(rightX + r * 0.20f, eyeY - r * 0.19f),
+            end = Offset(rightX - r * 0.17f, eyeY - r * 0.08f),
+            strokeWidth = (r * 0.075f).coerceAtLeast(2.2f),
+            cap = StrokeCap.Round
+        )
+    }
+
+    private fun DrawScope.drawStatusOverlays(
         ball: CombatBall,
         center: Offset,
-        radius: Float,
+        r: Float,
         globalTime: Float
     ) {
         if (ball.isStunned) {
             for (i in 0 until 6) {
-                val a = i * (PI.toFloat() / 3f) + globalTime * 15f
-                val p1 = Offset(center.x + cos(a) * radius * 0.85f, center.y + sin(a) * radius * 0.85f)
-                val p2 = Offset(center.x + cos(a + 0.25f) * radius * 1.32f, center.y + sin(a + 0.25f) * radius * 1.32f)
-                drawLine(Color(0xFF00F0FF), p1, p2, strokeWidth = 3.5f, cap = StrokeCap.Round)
+                val a = i * (PI.toFloat() / 3f) + globalTime * 12f
+                val p1 = Offset(center.x + cos(a) * r * 0.88f, center.y + sin(a) * r * 0.88f)
+                val p2 = Offset(center.x + cos(a + 0.25f) * r * 1.24f, center.y + sin(a + 0.25f) * r * 1.24f)
+                drawLine(Color(0xFF38BDF8), p1, p2, strokeWidth = 3f, cap = StrokeCap.Round)
             }
         }
 
         if (ball.bleedTicksRemaining > 0) {
             for (i in 0 until ball.bleedTicksRemaining) {
-                val a = globalTime * 4f + i * 1.6f
-                val drop = Offset(center.x + cos(a) * radius * 1.12f, center.y + sin(a) * radius * 1.12f)
-                drawCircle(Color(0xFFFF1E42), radius = radius * 0.11f, center = drop)
+                val a = globalTime * 4f + i * 1.57f
+                val drop = Offset(center.x + cos(a) * r * 1.10f, center.y + sin(a) * r * 1.10f)
+                drawCircle(Color(0xFFEF4444), radius = r * 0.09f, center = drop)
             }
         }
 
-        if (ball.character.id == "six_glow_magic") {
+        if (ball.character.id == "satoru_void") {
             drawCircle(
-                color = Color(0xFFB388FF).copy(alpha = 0.36f + sin(globalTime * 5f) * 0.12f),
-                radius = radius * 1.24f,
+                color = Color(0xFF818CF8).copy(alpha = 0.34f),
+                radius = r * 1.18f,
                 center = center,
-                style = Stroke(width = 2.5f)
+                style = Stroke(width = 2f)
             )
         }
     }

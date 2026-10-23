@@ -7,14 +7,19 @@ import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalView
+import androidx.core.view.WindowCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.model.AppScreen
+import com.example.model.AppThemeMode
 import com.example.model.CharacterRoster
 import com.example.model.GameMode
 import com.example.ui.screens.BattleArenaScreen
@@ -27,6 +32,7 @@ import com.example.ui.screens.QuestsScreen
 import com.example.ui.screens.ResultScreen
 import com.example.ui.screens.ShopScreen
 import com.example.ui.theme.AnimeBallClashTheme
+import com.example.ui.theme.AppTheme
 import com.example.viewmodel.GameViewModel
 
 class MainActivity : ComponentActivity() {
@@ -37,12 +43,14 @@ class MainActivity : ComponentActivity() {
             navigationBarStyle = SystemBarStyle.dark(AndroidColor.TRANSPARENT)
         )
         setContent {
-            AnimeBallClashTheme {
+            val viewModel: GameViewModel = viewModel()
+            val engineSettings by viewModel.engineSettings.collectAsStateWithLifecycle()
+
+            AnimeBallClashTheme(themeMode = engineSettings.themeMode) {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
-                    color = MaterialTheme.colorScheme.background
+                    color = AppTheme.palette.background
                 ) {
-                    val viewModel: GameViewModel = viewModel()
                     AnimeBallClashApp(viewModel = viewModel)
                 }
             }
@@ -59,16 +67,35 @@ fun AnimeBallClashApp(viewModel: GameViewModel) {
     val quests by viewModel.quests.collectAsStateWithLifecycle()
     val leaderboard by viewModel.leaderboard.collectAsStateWithLifecycle()
     val selectedMode by viewModel.selectedMode.collectAsStateWithLifecycle()
+    val botDifficulty by viewModel.botDifficulty.collectAsStateWithLifecycle()
     val countdown by viewModel.matchmakingCountdown.collectAsStateWithLifecycle()
     val opponentName by viewModel.opponentName.collectAsStateWithLifecycle()
     val opponentChar by viewModel.opponentCharacter.collectAsStateWithLifecycle()
-    val battleSim by viewModel.battleSim.collectAsStateWithLifecycle()
-    val hudState by viewModel.hudState.collectAsStateWithLifecycle()
-    val turnState by viewModel.turnState.collectAsStateWithLifecycle()
     val matchStats by viewModel.matchStats.collectAsStateWithLifecycle()
-    val matchTimerSeconds by viewModel.matchTimerSeconds.collectAsStateWithLifecycle()
 
-    val playerChar = CharacterRoster.getById(playerProfile.selectedCharacterId)
+    val palette = AppTheme.palette
+
+    val claimableQuestCount by remember(quests) {
+        derivedStateOf {
+            quests.count { !it.isClaimed && it.currentProgress >= it.targetProgress }
+        }
+    }
+
+    val playerChar = remember(playerProfile.selectedCharacterId) {
+        CharacterRoster.getById(playerProfile.selectedCharacterId)
+    }
+
+    // Dynamically match system bar icon contrast to Dark vs Light mode
+    val view = LocalView.current
+    if (!view.isInEditMode) {
+        val useDarkStatusIcons = !palette.isDark
+        SideEffect {
+            val window = (view.context as? ComponentActivity)?.window ?: return@SideEffect
+            val controller = WindowCompat.getInsetsController(window, view)
+            controller.isAppearanceLightStatusBars = useDarkStatusIcons
+            controller.isAppearanceLightNavigationBars = useDarkStatusIcons
+        }
+    }
 
     when (currentScreen) {
         AppScreen.LOADING -> {
@@ -80,22 +107,33 @@ fun AnimeBallClashApp(viewModel: GameViewModel) {
         AppScreen.HOME_HUB -> {
             HomeHubScreen(
                 profile = playerProfile,
+                unlockedCount = unlockedCharacterIds.size,
+                claimableQuestCount = claimableQuestCount,
+                selectedDifficulty = botDifficulty,
                 engineSettings = engineSettings,
                 onNavigate = { screen -> viewModel.navigateTo(screen) },
                 onCycleCharacter = { delta -> viewModel.cycleShowcaseCharacter(delta) },
+                onSelectDifficulty = { diff -> viewModel.setBotDifficulty(diff) },
                 onStartBattle = { mode, diff -> viewModel.startMatchmaking(mode, diff) },
                 onUpdateUsername = { newName -> viewModel.updateUsername(newName) },
-                onSaveEngineSettings = { newSettings -> viewModel.updateEngineSettings(newSettings) }
+                onSaveEngineSettings = { newSettings -> viewModel.updateEngineSettings(newSettings) },
+                onQuickToggleTheme = {
+                    val nextMode = if (palette.isDark) AppThemeMode.LIGHT else AppThemeMode.DARK
+                    viewModel.setThemeMode(nextMode)
+                },
+                onResetAccount = { viewModel.resetAccountToZero() }
             )
         }
 
         AppScreen.CHARACTER_SELECT -> {
             CharacterSelectScreen(
-                currentSelectedId = playerProfile.selectedCharacterId,
+                profile = playerProfile,
                 unlockedIds = unlockedCharacterIds,
-                engineSettings = engineSettings,
+                claimableQuestCount = claimableQuestCount,
                 onSelectCharacter = { charId -> viewModel.selectCharacter(charId) },
+                onUnlockCharacter = { char -> viewModel.unlockCharacter(char) },
                 onStartBattle = { viewModel.startMatchmaking(GameMode.PRACTICE_BOT) },
+                onNavigate = { screen -> viewModel.navigateTo(screen) },
                 onBack = { viewModel.navigateTo(AppScreen.HOME_HUB) }
             )
         }
@@ -113,24 +151,7 @@ fun AnimeBallClashApp(viewModel: GameViewModel) {
         }
 
         AppScreen.BATTLE_ARENA -> {
-            battleSim?.let { sim ->
-                BattleArenaScreen(
-                    simulation = sim,
-                    hudState = hudState,
-                    turnState = turnState,
-                    matchTimerSeconds = matchTimerSeconds,
-                    engineSettings = engineSettings,
-                    onStepFrame = { dt -> viewModel.stepBattleFrame(dt) },
-                    onPlayerLaunch = { dragVector, maxPullPx ->
-                        viewModel.onPlayerLaunch(dragVector, maxPullPx)
-                    },
-                    onTriggerUltimate = { viewModel.onPlayerTriggerUltimate() },
-                    onSurrender = { viewModel.navigateTo(AppScreen.HOME_HUB) },
-                    onSaveEngineSettings = { newSettings ->
-                        viewModel.updateEngineSettings(newSettings)
-                    }
-                )
-            }
+            BattleArenaRoute(viewModel = viewModel)
         }
 
         AppScreen.RESULT -> {
@@ -149,7 +170,9 @@ fun AnimeBallClashApp(viewModel: GameViewModel) {
             ShopScreen(
                 profile = playerProfile,
                 unlockedIds = unlockedCharacterIds,
+                claimableQuestCount = claimableQuestCount,
                 onUnlockCharacter = { char -> viewModel.unlockCharacter(char) },
+                onNavigate = { screen -> viewModel.navigateTo(screen) },
                 onBack = { viewModel.navigateTo(AppScreen.HOME_HUB) }
             )
         }
@@ -158,6 +181,7 @@ fun AnimeBallClashApp(viewModel: GameViewModel) {
             QuestsScreen(
                 quests = quests,
                 onClaimQuest = { questId -> viewModel.claimQuest(questId) },
+                onNavigate = { screen -> viewModel.navigateTo(screen) },
                 onBack = { viewModel.navigateTo(AppScreen.HOME_HUB) }
             )
         }
@@ -165,8 +189,37 @@ fun AnimeBallClashApp(viewModel: GameViewModel) {
         AppScreen.LEADERBOARD -> {
             LeaderboardScreen(
                 leaderboard = leaderboard,
+                claimableQuestCount = claimableQuestCount,
+                onNavigate = { screen -> viewModel.navigateTo(screen) },
                 onBack = { viewModel.navigateTo(AppScreen.HOME_HUB) }
             )
         }
+    }
+}
+
+@Composable
+private fun BattleArenaRoute(viewModel: GameViewModel) {
+    val battleSim by viewModel.battleSim.collectAsStateWithLifecycle()
+    val hudState by viewModel.hudState.collectAsStateWithLifecycle()
+    val turnState by viewModel.turnState.collectAsStateWithLifecycle()
+    val engineSettings by viewModel.engineSettings.collectAsStateWithLifecycle()
+
+    battleSim?.let { sim ->
+        BattleArenaScreen(
+            simulation = sim,
+            hudState = hudState,
+            turnState = turnState,
+            engineSettings = engineSettings,
+            onStepFrame = { dt -> viewModel.stepBattleFrame(dt) },
+            onPlayerLaunch = { dragVector, maxPullPx ->
+                viewModel.onPlayerLaunch(dragVector, maxPullPx)
+            },
+            onQuickLaunchOpening = { viewModel.onQuickLaunchOpening() },
+            onTriggerUltimate = { viewModel.onPlayerTriggerUltimate() },
+            onSurrender = { viewModel.navigateTo(AppScreen.HOME_HUB) },
+            onSaveEngineSettings = { newSettings ->
+                viewModel.updateEngineSettings(newSettings)
+            }
+        )
     }
 }

@@ -2,7 +2,6 @@ package com.example.ui.components
 
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -27,24 +26,29 @@ object CombatVfxRenderer {
         globalTime: Float
     ) {
         with(scope) {
-            for (hazard in hazards) {
+            for (i in hazards.indices) {
+                val hazard = hazards[i]
                 val alpha = (hazard.life / hazard.maxLife).coerceIn(0f, 0.85f)
-                val pulse = sin(globalTime * 11f + hazard.id) * 0.14f + 1.0f
+                val pulse = sin(globalTime * 10f + hazard.id) * 0.08f + 1.0f
                 val r = hazard.radius * pulse
                 val c = Offset(hazard.x, hazard.y)
 
+                // Flat concentric cel-shaded fire rings (zero Brush allocation!)
                 drawCircle(
-                    brush = Brush.radialGradient(
-                        colors = listOf(
-                            Color(0xFFFFEA00).copy(alpha = alpha * 0.85f),
-                            Color(0xFFFF5E1A).copy(alpha = alpha * 0.65f),
-                            Color.Transparent
-                        ),
-                        center = c,
-                        radius = r
-                    ),
+                    color = Color(0xFFF97316).copy(alpha = alpha * 0.32f),
                     radius = r,
                     center = c
+                )
+                drawCircle(
+                    color = Color(0xFFFACC15).copy(alpha = alpha * 0.45f),
+                    radius = r * 0.58f,
+                    center = c
+                )
+                drawCircle(
+                    color = Color(0xFFEF4444).copy(alpha = alpha * 0.70f),
+                    radius = r,
+                    center = c,
+                    style = Stroke(width = 2.5f)
                 )
             }
         }
@@ -60,21 +64,23 @@ object CombatVfxRenderer {
         renderMode: RenderMode
     ) {
         with(scope) {
-            // 1. EXPANDING IMPACT SHOCKWAVES
-            for (ring in shockwaves) {
+            // 1. Expanding impact shockwaves
+            for (i in shockwaves.indices) {
+                val ring = shockwaves[i]
                 val progress = 1f - (ring.life / ring.maxLife).coerceIn(0f, 1f)
                 val alpha = (1f - progress).coerceIn(0f, 1f)
-                val currentR = ring.maxRadius * (0.25f + progress * 0.75f)
+                val currentR = ring.maxRadius * (0.28f + progress * 0.72f)
                 drawCircle(
-                    color = ring.color.copy(alpha = alpha * 0.85f),
+                    color = ring.color.copy(alpha = alpha * 0.80f),
                     radius = currentR,
                     center = Offset(ring.x, ring.y),
-                    style = Stroke(width = (10f * (1f - progress * 0.7f)).coerceAtLeast(2f))
+                    style = Stroke(width = (8f * (1f - progress * 0.65f)).coerceAtLeast(2f))
                 )
             }
 
-            // 2. HIT SPARKS & PIXEL BURSTS
-            for (p in particles) {
+            // 2. Hit sparks
+            for (i in particles.indices) {
+                val p = particles[i]
                 val alpha = (p.life / p.maxLife).coerceIn(0f, 1f)
                 val pColor = p.color.copy(alpha = alpha)
 
@@ -85,13 +91,6 @@ object CombatVfxRenderer {
                         size = Size(p.size * 2f, p.size * 2f)
                     )
                 } else {
-                    if (renderMode == RenderMode.REALISTIC) {
-                        drawCircle(
-                            color = pColor.copy(alpha = alpha * 0.35f),
-                            radius = p.size * 2.1f,
-                            center = Offset(p.x, p.y)
-                        )
-                    }
                     drawCircle(
                         color = pColor,
                         radius = p.size,
@@ -100,28 +99,28 @@ object CombatVfxRenderer {
                 }
             }
 
-            // 3. FLOATING ARCADE COMBAT NUMBERS
-            for (ft in floatingTexts) {
+            // 3. Floating combat damage callouts
+            for (i in floatingTexts.indices) {
+                val ft = floatingTexts[i]
                 val alpha = (ft.life / ft.maxLife).coerceIn(0f, 1f)
-                val fontSize = if (ft.isCrit) 21.sp else 16.sp
+                val fontSize = if (ft.isCrit) 19.sp else 15.sp
                 val style = TextStyle(
                     fontFamily = displayFont,
                     color = ft.color.copy(alpha = alpha),
                     fontSize = fontSize,
-                    fontWeight = FontWeight.Black,
-                    letterSpacing = 0.6.sp
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 0.4.sp
                 )
 
                 val layout = textMeasurer.measure(text = ft.text, style = style)
                 val tx = ft.x - layout.size.width / 2f
                 val ty = ft.y
 
-                // Crisp dark drop-shadow outline
                 drawText(
                     textMeasurer = textMeasurer,
                     text = ft.text,
-                    topLeft = Offset(tx + 2.5f, ty + 2.5f),
-                    style = style.copy(color = Color(0xFF07080F).copy(alpha = alpha))
+                    topLeft = Offset(tx + 2f, ty + 2f),
+                    style = style.copy(color = Color(0xFF09090B).copy(alpha = alpha))
                 )
                 drawText(
                     textMeasurer = textMeasurer,

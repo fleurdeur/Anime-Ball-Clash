@@ -15,92 +15,80 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CutCornerShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.outlined.DarkMode
+import androidx.compose.material.icons.outlined.LightMode
+import androidx.compose.material.icons.outlined.RestartAlt
+import androidx.compose.material.icons.outlined.SettingsBrightness
+import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
+import com.example.model.AppThemeMode
 import com.example.model.CharacterRoster
-import com.example.model.CombatBall
 import com.example.model.EngineSettings
 import com.example.model.PhysicsMesh
 import com.example.model.RenderMode
 import com.example.model.TargetFPS
-import com.example.model.Vector2
-import com.example.model.VerletHairNode
-import com.example.ui.theme.AwakeningGold
-import com.example.ui.theme.CrispWhite
-import com.example.ui.theme.CyberVoltCyan
-import com.example.ui.theme.ElevatedPanel
-import com.example.ui.theme.GunmetalSurface
-import com.example.ui.theme.HairlineSteel
-import com.example.ui.theme.MutedSilver
-import com.example.ui.theme.ObsidianVoid
-import com.example.ui.theme.SolarFlareOrange
+import com.example.ui.theme.AppTheme
 
 @Composable
 fun GraphicsConfigDialog(
     currentSettings: EngineSettings,
+    selectedCharacterId: String = "kakarot_z",
     onSaveSettings: (EngineSettings) -> Unit,
+    onResetAccount: (() -> Unit)? = null,
     onDismiss: () -> Unit
 ) {
+    val palette = AppTheme.palette
+
+    var selectedThemeMode by remember(currentSettings.themeMode) { mutableStateOf(currentSettings.themeMode) }
     var selectedRenderMode by remember { mutableStateOf(currentSettings.renderMode) }
     var selectedPhysicsMesh by remember { mutableStateOf(currentSettings.physicsMesh) }
     var selectedFps by remember { mutableStateOf(currentSettings.targetFps) }
-    var sfxEnabled by remember { mutableStateOf(currentSettings.sfxEnabled) }
     var hapticsEnabled by remember { mutableStateOf(currentSettings.hapticsEnabled) }
     var screenShake by remember { mutableStateOf(currentSettings.screenShake) }
+    var confirmReset by remember { mutableStateOf(false) }
 
-    var animTime by remember { mutableFloatStateOf(0f) }
-
-    LaunchedEffect(Unit) {
-        var lastNanos = 0L
-        while (true) {
-            withFrameNanos { nanos ->
-                if (lastNanos == 0L) lastNanos = nanos
-                animTime += ((nanos - lastNanos) / 1_000_000_000f).coerceIn(0f, 0.05f)
-                lastNanos = nanos
-            }
-        }
-    }
+    val previewChar = remember(selectedCharacterId) { CharacterRoster.getById(selectedCharacterId) }
 
     Dialog(onDismissRequest = onDismiss) {
         Surface(
             modifier = Modifier
                 .fillMaxWidth()
                 .testTag("graphics_settings_dialog"),
-            shape = CutCornerShape(16.dp),
-            color = GunmetalSurface,
-            border = BorderStroke(1.5.dp, HairlineSteel)
+            shape = RoundedCornerShape(24.dp),
+            color = palette.cardSurface,
+            border = BorderStroke(1.dp, palette.border)
         ) {
             Column(
                 modifier = Modifier
-                    .padding(18.dp)
+                    .padding(20.dp)
                     .verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
+                verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -108,12 +96,12 @@ fun GraphicsConfigDialog(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.Tune, contentDescription = null, tint = CyberVoltCyan)
+                        Icon(Icons.Outlined.Tune, contentDescription = null, tint = palette.primaryAccent)
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = "ENGINE CONFIGURATOR",
+                            text = "Settings",
                             style = MaterialTheme.typography.headlineMedium,
-                            color = CrispWhite
+                            color = palette.textPrimary
                         )
                     }
                     IconButton(
@@ -122,61 +110,103 @@ fun GraphicsConfigDialog(
                             .size(48.dp)
                             .testTag("close_settings_button")
                     ) {
-                        Icon(Icons.Default.Close, contentDescription = "Close", tint = MutedSilver)
+                        Icon(Icons.Default.Close, contentDescription = "Close", tint = palette.textSecondary)
                     }
                 }
 
-                // Live Preview Swatch
+                // 1. Appearance: Dark / Light / System (applies live immediately!)
+                Text(
+                    text = "Appearance",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = palette.textPrimary
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    AppThemeMode.entries.forEach { mode ->
+                        val active = selectedThemeMode == mode
+                        val icon = when (mode) {
+                            AppThemeMode.DARK -> Icons.Outlined.DarkMode
+                            AppThemeMode.LIGHT -> Icons.Outlined.LightMode
+                            AppThemeMode.SYSTEM -> Icons.Outlined.SettingsBrightness
+                        }
+                        Surface(
+                            onClick = {
+                                selectedThemeMode = mode
+                                onSaveSettings(
+                                    currentSettings.copy(
+                                        themeMode = mode,
+                                        renderMode = selectedRenderMode,
+                                        physicsMesh = selectedPhysicsMesh,
+                                        targetFps = selectedFps,
+                                        hapticsEnabled = hapticsEnabled,
+                                        screenShake = screenShake
+                                    )
+                                )
+                            },
+                            color = if (active) palette.primaryAccent else palette.elevatedSurface,
+                            shape = RoundedCornerShape(12.dp),
+                            border = BorderStroke(1.dp, if (active) palette.primaryAccent else palette.border),
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(48.dp)
+                                .testTag("theme_mode_${mode.name.lowercase()}")
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center,
+                                modifier = Modifier.padding(horizontal = 6.dp)
+                            ) {
+                                Icon(
+                                    imageVector = icon,
+                                    contentDescription = null,
+                                    tint = if (active) Color.White else palette.textSecondary,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(5.dp))
+                                Text(
+                                    text = mode.title,
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = if (active) Color.White else palette.textPrimary
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // Fighter Preview Swatch
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(116.dp)
-                        .clip(CutCornerShape(10.dp))
-                        .background(ObsidianVoid)
-                        .border(1.dp, HairlineSteel, CutCornerShape(10.dp)),
+                        .height(98.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(palette.stageSurface)
+                        .border(1.dp, palette.border, RoundedCornerShape(16.dp)),
                     contentAlignment = Alignment.Center
                 ) {
-                    Canvas(modifier = Modifier.size(150.dp, 110.dp)) {
-                        val cx = size.width / 2f
-                        val cy = size.height / 2f + 6f
-                        val r = size.minDimension * 0.30f
-                        val ball = CombatBall(
-                            id = "cfg_preview",
-                            name = "Preview",
-                            position = Vector2(cx, cy),
-                            velocity = Vector2.Zero,
-                            radius = r,
-                            character = CharacterRoster.getById("saiyan_spirit"),
-                            weaponAngle = animTime * 3f,
-                            hairNodes = if (selectedPhysicsMesh == PhysicsMesh.DYNAMIC) {
-                                List(5) { idx ->
-                                    VerletHairNode(cx, cy - r * 0.5f - idx * (r * 0.28f), cx, cy - r * 0.5f - idx * (r * 0.28f))
-                                }
-                            } else emptyList()
-                        )
-                        AnimeBallRenderer.drawBall(
+                    Canvas(modifier = Modifier.size(116.dp, 90.dp)) {
+                        AnimeBallRenderer.drawPreviewAvatar(
                             scope = this,
-                            ball = ball,
-                            renderMode = selectedRenderMode,
-                            physicsMesh = selectedPhysicsMesh,
-                            globalTime = animTime
+                            character = previewChar,
+                            weaponAngle = 0.7f
                         )
                     }
                 }
 
-                // 1. Render Tier
-                Text("RENDER PIPELINE", style = MaterialTheme.typography.labelMedium, color = CyberVoltCyan)
+                // 2. Graphics Preset
+                Text("Graphics Preset", style = MaterialTheme.typography.labelLarge, color = palette.textPrimary)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    RenderMode.values().forEach { mode ->
+                    RenderMode.entries.forEach { mode ->
                         val active = selectedRenderMode == mode
                         Surface(
                             onClick = { selectedRenderMode = mode },
-                            color = if (active) CyberVoltCyan else ElevatedPanel,
-                            shape = CutCornerShape(8.dp),
-                            border = BorderStroke(1.dp, if (active) CyberVoltCyan else HairlineSteel),
+                            color = if (active) palette.blueAccent else palette.elevatedSurface,
+                            shape = RoundedCornerShape(12.dp),
+                            border = BorderStroke(1.dp, if (active) palette.blueAccent else palette.border),
                             modifier = Modifier
                                 .weight(1f)
                                 .height(48.dp)
@@ -184,27 +214,27 @@ fun GraphicsConfigDialog(
                             Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(4.dp)) {
                                 Text(
                                     text = mode.title,
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = if (active) ObsidianVoid else CrispWhite
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = if (active) Color.White else palette.textPrimary
                                 )
                             }
                         }
                     }
                 }
 
-                // 2. Physics Mesh
-                Text("DEFORMATION & HAIR MESH", style = MaterialTheme.typography.labelMedium, color = AwakeningGold)
+                // 3. Sphere Deformation
+                Text("Impact Elasticity", style = MaterialTheme.typography.labelLarge, color = palette.textPrimary)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    PhysicsMesh.values().forEach { mesh ->
+                    PhysicsMesh.entries.forEach { mesh ->
                         val active = selectedPhysicsMesh == mesh
                         Surface(
                             onClick = { selectedPhysicsMesh = mesh },
-                            color = if (active) AwakeningGold else ElevatedPanel,
-                            shape = CutCornerShape(8.dp),
-                            border = BorderStroke(1.dp, if (active) AwakeningGold else HairlineSteel),
+                            color = if (active) palette.blueAccent else palette.elevatedSurface,
+                            shape = RoundedCornerShape(12.dp),
+                            border = BorderStroke(1.dp, if (active) palette.blueAccent else palette.border),
                             modifier = Modifier
                                 .weight(1f)
                                 .height(48.dp)
@@ -213,52 +243,56 @@ fun GraphicsConfigDialog(
                                 Text(
                                     text = mesh.title,
                                     style = MaterialTheme.typography.labelLarge,
-                                    color = if (active) ObsidianVoid else CrispWhite
+                                    color = if (active) Color.White else palette.textPrimary
                                 )
                             }
                         }
                     }
                 }
 
-                // 3. Frame Target Chips
-                Text("TARGET REFRESH RATE", style = MaterialTheme.typography.labelMedium, color = SolarFlareOrange)
+                // 4. Frame Rate Target
+                Text("Frame Rate Target", style = MaterialTheme.typography.labelLarge, color = palette.textPrimary)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    TargetFPS.values().forEach { fps ->
+                    TargetFPS.entries.forEach { fps ->
                         val active = selectedFps == fps
                         Surface(
                             onClick = { selectedFps = fps },
-                            color = if (active) SolarFlareOrange else ElevatedPanel,
-                            shape = CutCornerShape(6.dp),
-                            border = BorderStroke(1.dp, if (active) SolarFlareOrange else HairlineSteel),
+                            color = if (active) palette.primaryAccent else palette.elevatedSurface,
+                            shape = RoundedCornerShape(10.dp),
+                            border = BorderStroke(1.dp, if (active) palette.primaryAccent else palette.border),
                             modifier = Modifier
                                 .weight(1f)
-                                .height(42.dp)
+                                .height(48.dp)
                         ) {
                             Box(contentAlignment = Alignment.Center) {
                                 Text(
                                     text = "${fps.fps}",
                                     style = MaterialTheme.typography.labelLarge,
-                                    color = CrispWhite
+                                    color = if (active) Color.White else palette.textPrimary
                                 )
                             }
                         }
                     }
                 }
 
-                // Haptics & Screen Shake Switches
+                HorizontalDivider(color = palette.border)
+
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("IMPACT HAPTICS", style = MaterialTheme.typography.bodyMedium, color = CrispWhite)
+                    Text("Collision Haptics", style = MaterialTheme.typography.bodyLarge, color = palette.textPrimary)
                     Switch(
                         checked = hapticsEnabled,
                         onCheckedChange = { hapticsEnabled = it },
-                        colors = SwitchDefaults.colors(checkedThumbColor = CyberVoltCyan)
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = Color.White,
+                            checkedTrackColor = palette.primaryAccent
+                        )
                     )
                 }
 
@@ -267,22 +301,58 @@ fun GraphicsConfigDialog(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("ARENA SCREEN SHAKE", style = MaterialTheme.typography.bodyMedium, color = CrispWhite)
+                    Text("Impact Screen Shake", style = MaterialTheme.typography.bodyLarge, color = palette.textPrimary)
                     Switch(
                         checked = screenShake,
                         onCheckedChange = { screenShake = it },
-                        colors = SwitchDefaults.colors(checkedThumbColor = CyberVoltCyan)
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = Color.White,
+                            checkedTrackColor = palette.primaryAccent
+                        )
                     )
+                }
+
+                if (onResetAccount != null) {
+                    HorizontalDivider(color = palette.border)
+                    OutlinedButton(
+                        onClick = {
+                            if (confirmReset) {
+                                onResetAccount()
+                                confirmReset = false
+                                onDismiss()
+                            } else {
+                                confirmReset = true
+                            }
+                        },
+                        shape = RoundedCornerShape(12.dp),
+                        border = BorderStroke(1.dp, palette.primaryAccent),
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            containerColor = if (confirmReset) palette.primaryAccentSoft else Color.Transparent,
+                            contentColor = palette.primaryAccent
+                        ),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
+                            .testTag("reset_account_button")
+                    ) {
+                        Icon(Icons.Outlined.RestartAlt, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = if (confirmReset) "Tap Again to Wipe Progress" else "Reset Account to Fresh Zero",
+                            style = MaterialTheme.typography.labelLarge
+                        )
+                    }
                 }
 
                 Button(
                     onClick = {
                         onSaveSettings(
                             EngineSettings(
+                                themeMode = selectedThemeMode,
                                 renderMode = selectedRenderMode,
                                 physicsMesh = selectedPhysicsMesh,
                                 targetFps = selectedFps,
-                                sfxEnabled = sfxEnabled,
+                                sfxEnabled = currentSettings.sfxEnabled,
                                 hapticsEnabled = hapticsEnabled,
                                 bloomPostFx = selectedRenderMode == RenderMode.REALISTIC,
                                 screenShake = screenShake
@@ -290,17 +360,20 @@ fun GraphicsConfigDialog(
                         )
                         onDismiss()
                     },
-                    shape = CutCornerShape(10.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = CyberVoltCyan),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = palette.primaryAccent,
+                        contentColor = Color.White
+                    ),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(50.dp)
+                        .height(52.dp)
                         .testTag("apply_engine_settings_button")
                 ) {
                     Text(
-                        text = "APPLY & SAVE",
-                        style = MaterialTheme.typography.labelLarge,
-                        color = ObsidianVoid
+                        text = "Apply & Close",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = Color.White
                     )
                 }
             }
