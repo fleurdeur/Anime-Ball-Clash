@@ -1,0 +1,6 @@
+{
+  "name": "Anime Ball Clash",
+  "description": "High-velocity 1v1 anime sphere combat game with physics collisions, canon passives, dynamic graphics engine, and timed awakenings.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
