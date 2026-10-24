@@ -1,6 +1,8 @@
 package com.example.model
 
 import androidx.compose.ui.graphics.Color
+import kotlin.math.abs
+import kotlin.math.max
 
 enum class CharacterClass(val displayName: String, val shortRole: String) {
     ATTACKER("Bruiser", "Heavy Impact"),
@@ -48,7 +50,170 @@ enum class WeaponVisualType {
     ALLOY_YOYOS,
     GRIMOIRE_GREATSWORD,
     HELLSING_PISTOLS,
-    MAGE_STAFF
+    MAGE_STAFF,
+    CRESCENT_SCYTHE,
+    SPIRAL_DRILL,
+    SPIRIT_BOW,
+    MECHA_FUNNELS,
+    ROYAL_GATES,
+    DEMON_KANABO,
+    CHAKRAM_RINGS,
+    ARCANE_CARDS,
+    EXCALIBUR_BLADE,
+    CYBER_CANNON
+}
+
+/**
+ * 18 deterministic, working combat passives so EVERY character in the 220+ roster
+ * triggers authentic gameplay mechanics on collision, defense, or wall ricochet.
+ */
+enum class PassiveArchetype(val shortTag: String) {
+    SHOCKWAVE_KNOCKBACK("IMPACT WAVE"),
+    SCORCH_BURN("BLAZE BURN"),
+    CRIMSON_BLEED("BLEED SLASH"),
+    LIGHTNING_PARALYZE("VOLT STUN"),
+    ELASTIC_MOMENTUM("SNAP REBOUND"),
+    INFINITY_BARRIER("AEGIS GUARD"),
+    VAMPIRIC_SIPHON("BLOOD DRAIN"),
+    ANTI_MAGIC_DRAIN("MANA BREAK"),
+    BERSERKER_RAGE("WRATH RAGE"),
+    VECTOR_REFLECT("COUNTER THORNS"),
+    SHADOW_MONARCH_STACK("SOUL HARVEST"),
+    ADAPTIVE_EVOLUTION("ROYAL EVOLVE"),
+    FROST_GRAVITY_SLOW("GRAVITY CHILL"),
+    BLACK_FLASH_CRIT("BLACK FLASH"),
+    REGEN_IMMORTAL("VITAL REGEN"),
+    EXECUTE_SHRINE("REAPER EXEC"),
+    ARCANE_OVERCHARGE("MANA SURGE"),
+    TITAN_JUGGERNAUT("IRON TITAN")
+}
+
+/**
+ * 10 distinct Ultimate Awakening mechanics across all 220+ fighters.
+ */
+enum class UltimateArchetype {
+    HYPER_AWAKEN,      // Massive speed + damage aura transformation
+    TIME_STOP,         // Freezes rival sphere in place for 1.65s
+    DOMAIN_STUN,       // Spatial lock + defense shred
+    METEOR_NUKE,       // Instant AoE burst damage + knockback + crater hazard
+    SERIOUS_ONE_PUNCH, // Arms a devastating single-hit impact multiplier
+    HEAL_REFORGE,      // Restores substantial HP + grants barrier
+    ULT_NULLIFY,       // Cancels active rival Ultimate or drains rival gauge + boosts slash
+    HAZARD_STORM,      // Spawns multiple elemental hazard zones across the court
+    GRAVITY_CRUSH,     // Pulls/crushes rival + heavy slow + burst damage
+    SOUL_DEVOUR        // Steals rival HP & Ultimate meter while boosting speed
+}
+
+enum class UpgradeStatType(val title: String, val shortLabel: String) {
+    HEALTH("Vitality Core", "HP"),
+    POWER("Attack Force", "PWR"),
+    COOLDOWN("Chrono Drive", "CD")
+}
+
+data class CharacterUpgradeState(
+    val healthLevel: Int = 0,
+    val powerLevel: Int = 0,
+    val cooldownLevel: Int = 0
+) {
+    val totalUpgrades: Int get() = healthLevel + powerLevel + cooldownLevel
+
+    fun getLevel(type: UpgradeStatType): Int = when (type) {
+        UpgradeStatType.HEALTH -> healthLevel
+        UpgradeStatType.POWER -> powerLevel
+        UpgradeStatType.COOLDOWN -> cooldownLevel
+    }
+
+    fun isMaxed(type: UpgradeStatType): Boolean = getLevel(type) >= MAX_LEVEL
+
+    fun nextCostGold(type: UpgradeStatType): Int = costForNextLevel(getLevel(type))
+
+    fun effectiveMaxHp(baseMaxHp: Int): Int = baseMaxHp + (healthLevel * HP_PER_LEVEL)
+
+    fun effectiveBaseDamage(baseDamage: Int): Int = baseDamage + (powerLevel * DAMAGE_PER_LEVEL)
+
+    fun effectiveUltimateMultiplier(baseMult: Float): Float = baseMult + (powerLevel * 0.04f)
+
+    fun effectiveUltimateCooldown(baseCd: Float): Float =
+        max(MIN_ULT_COOLDOWN_SEC, baseCd - cooldownLevel * CD_REDUCTION_PER_LEVEL)
+
+    fun redirectCooldownReduction(): Float = cooldownLevel * 0.09f
+
+    companion object {
+        const val MAX_LEVEL = 10
+        const val HP_PER_LEVEL = 35
+        const val DAMAGE_PER_LEVEL = 2
+        const val CD_REDUCTION_PER_LEVEL = 0.45f
+        const val MIN_ULT_COOLDOWN_SEC = 3.2f
+
+        private val LEVEL_COSTS = intArrayOf(
+            2_500,   // Lv 0 -> 1
+            5_000,   // Lv 1 -> 2
+            9_000,   // Lv 2 -> 3
+            15_000,  // Lv 3 -> 4
+            24_000,  // Lv 4 -> 5
+            36_000,  // Lv 5 -> 6
+            52_000,  // Lv 6 -> 7
+            72_000,  // Lv 7 -> 8
+            98_000,  // Lv 8 -> 9
+            135_000  // Lv 9 -> 10
+        )
+
+        fun costForNextLevel(currentLevel: Int): Int {
+            if (currentLevel >= MAX_LEVEL) return 0
+            return LEVEL_COSTS[currentLevel.coerceIn(0, LEVEL_COSTS.lastIndex)]
+        }
+    }
+}
+
+enum class EyeVisualStyle {
+    FIERCE_SHONEN,
+    CRIMSON_SHARINGAN,
+    RINNEGAN_RIPPLE,
+    HYPNOTIC_RINGS,
+    SIX_EYES_VISOR,
+    CYBER_VISOR,
+    STAR_SHADES,
+    DEMON_SLIT,
+    HOLLOW_MASK,
+    ESPER_PSYCHIC,
+    SERENE_NOBLE,
+    SCARRED_ONE_EYE
+}
+
+enum class CrownVisualStyle {
+    SAIYAN_WILD,
+    SHONEN_SPIKY,
+    SLICK_VILLAIN,
+    FLOWING_MANE,
+    TWIN_TAILS,
+    BOWL_ESPER,
+    STRAW_HAT,
+    FEDORA_TRILBY,
+    PIRATE_TRICORNE,
+    SHINOBI_HEADBAND,
+    DEMON_HORNS,
+    ROYAL_CROWN,
+    MECHA_VFIN,
+    KNIGHT_HELM,
+    SAMURAI_KABUTO,
+    WITCH_HOOD,
+    HALO_CROWN,
+    BALD_GLEAM
+}
+
+enum class FaceMarkVisualStyle {
+    NONE,
+    WHISKER_MARKS,
+    FOREHEAD_SCAR,
+    CURSE_TATTOOS,
+    LIGHTNING_BOLTS,
+    CROSS_SCAR,
+    FANG_JAW,
+    SHINOBI_MASK,
+    CYBER_SEAMS,
+    ROYAL_GEM,
+    STAR_TEAR,
+    BLOOD_STRIPE
 }
 
 data class CharacterData(
@@ -60,7 +225,7 @@ data class CharacterData(
     val popularityTier: AnimeTier = AnimeTier.POPULAR,
     val classType: CharacterClass,
     val element: ElementTag,
-    val maxHp: Int = 100,
+    val maxHp: Int = 360,
     val baseDamage: Int,
     val speedRating: Float, // 1.0 to 1.65 cruise speed multiplier
     val massRating: Float,  // 0.85 to 2.1 collision momentum
@@ -69,22 +234,192 @@ data class CharacterData(
     val auraColor: Color,
     val hairColor: Color,
     val weaponType: WeaponVisualType,
+    val passiveArchetype: PassiveArchetype = inferPassiveArchetype(classType, element, alignment),
+    val ultimateArchetype: UltimateArchetype = inferUltimateArchetype(classType, element, alignment),
     val passiveName: String,
     val passiveDescription: String,
     val ultimateName: String,
     val ultimateDurationSeconds: Float,
-    val ultimateCooldownSeconds: Float = 8.0f,
+    val ultimateCooldownSeconds: Float = 8.5f,
     val ultimateDamageMultiplier: Float,
     val ultimateDescription: String,
     val voiceLine: String,
     val unlockCostGold: Int = 0,
     val unlockCostGems: Int = 0,
-    val isStarter: Boolean = false
+    val isStarter: Boolean = false,
+    val eyeStyle: EyeVisualStyle? = null,
+    val crownStyle: CrownVisualStyle? = null,
+    val faceMarkStyle: FaceMarkVisualStyle? = null,
+    val hasCapeOrWings: Boolean = false
+) {
+    val resolvedEyeStyle: EyeVisualStyle
+        get() = eyeStyle ?: run {
+            val h = abs(id.hashCode())
+            when {
+                alignment == CharacterAlignment.ANTAGONIST && element == ElementTag.MAGIC ->
+                    if (h % 2 == 0) EyeVisualStyle.RINNEGAN_RIPPLE else EyeVisualStyle.HYPNOTIC_RINGS
+                alignment == CharacterAlignment.ANTAGONIST ->
+                    when (h % 4) {
+                        0 -> EyeVisualStyle.DEMON_SLIT
+                        1 -> EyeVisualStyle.CRIMSON_SHARINGAN
+                        2 -> EyeVisualStyle.HOLLOW_MASK
+                        else -> EyeVisualStyle.HYPNOTIC_RINGS
+                    }
+                element == ElementTag.MAGIC ->
+                    if (h % 2 == 0) EyeVisualStyle.SERENE_NOBLE else EyeVisualStyle.ESPER_PSYCHIC
+                element == ElementTag.ELEC ->
+                    if (h % 3 == 0) EyeVisualStyle.CYBER_VISOR else EyeVisualStyle.FIERCE_SHONEN
+                element == ElementTag.SLASH ->
+                    if (h % 3 == 0) EyeVisualStyle.SCARRED_ONE_EYE else EyeVisualStyle.FIERCE_SHONEN
+                else ->
+                    if (h % 5 == 0) EyeVisualStyle.STAR_SHADES else EyeVisualStyle.FIERCE_SHONEN
+            }
+        }
+
+    val resolvedCrownStyle: CrownVisualStyle
+        get() = crownStyle ?: run {
+            if (hairColor.alpha == 0f) return@run CrownVisualStyle.BALD_GLEAM
+            val h = abs(id.hashCode() / 7)
+            when {
+                weaponType == WeaponVisualType.MECHA_FUNNELS || weaponType == WeaponVisualType.CYBER_CANNON -> CrownVisualStyle.MECHA_VFIN
+                alignment == CharacterAlignment.ANTAGONIST && h % 5 == 0 -> CrownVisualStyle.DEMON_HORNS
+                alignment == CharacterAlignment.ANTAGONIST && h % 5 == 1 -> CrownVisualStyle.ROYAL_CROWN
+                alignment == CharacterAlignment.ANTAGONIST && h % 5 == 2 -> CrownVisualStyle.SLICK_VILLAIN
+                element == ElementTag.MAGIC && h % 4 == 0 -> CrownVisualStyle.WITCH_HOOD
+                element == ElementTag.MAGIC && h % 4 == 1 -> CrownVisualStyle.TWIN_TAILS
+                element == ElementTag.SLASH && h % 4 == 0 -> CrownVisualStyle.SAMURAI_KABUTO
+                element == ElementTag.SLASH && h % 4 == 1 -> CrownVisualStyle.SHINOBI_HEADBAND
+                element == ElementTag.HEAVY && h % 4 == 0 -> CrownVisualStyle.SAIYAN_WILD
+                element == ElementTag.HEAVY && h % 4 == 1 -> CrownVisualStyle.KNIGHT_HELM
+                h % 3 == 0 -> CrownVisualStyle.FLOWING_MANE
+                else -> CrownVisualStyle.SHONEN_SPIKY
+            }
+        }
+
+    val resolvedFaceMarkStyle: FaceMarkVisualStyle
+        get() = faceMarkStyle ?: run {
+            val h = abs(id.hashCode() / 13)
+            when (h % 10) {
+                0 -> FaceMarkVisualStyle.FOREHEAD_SCAR
+                1 -> FaceMarkVisualStyle.CURSE_TATTOOS
+                2 -> FaceMarkVisualStyle.CROSS_SCAR
+                3 -> FaceMarkVisualStyle.SHINOBI_MASK
+                4 -> FaceMarkVisualStyle.LIGHTNING_BOLTS
+                5 -> FaceMarkVisualStyle.ROYAL_GEM
+                6 -> FaceMarkVisualStyle.FANG_JAW
+                7 -> FaceMarkVisualStyle.CYBER_SEAMS
+                8 -> FaceMarkVisualStyle.BLOOD_STRIPE
+                else -> FaceMarkVisualStyle.STAR_TEAR
+            }
+        }
+
+    companion object {
+        fun inferPassiveArchetype(
+            cls: CharacterClass,
+            elem: ElementTag,
+            align: CharacterAlignment
+        ): PassiveArchetype = when {
+            elem == ElementTag.FIRE -> PassiveArchetype.SCORCH_BURN
+            elem == ElementTag.ELEC -> PassiveArchetype.LIGHTNING_PARALYZE
+            elem == ElementTag.SLASH && align == CharacterAlignment.ANTAGONIST -> PassiveArchetype.EXECUTE_SHRINE
+            elem == ElementTag.SLASH -> PassiveArchetype.CRIMSON_BLEED
+            elem == ElementTag.MAGIC && align == CharacterAlignment.ANTAGONIST -> PassiveArchetype.ANTI_MAGIC_DRAIN
+            elem == ElementTag.MAGIC -> PassiveArchetype.ARCANE_OVERCHARGE
+            cls == CharacterClass.SPEEDSTER -> PassiveArchetype.ELASTIC_MOMENTUM
+            align == CharacterAlignment.ANTAGONIST -> PassiveArchetype.VAMPIRIC_SIPHON
+            else -> PassiveArchetype.SHOCKWAVE_KNOCKBACK
+        }
+
+        fun inferUltimateArchetype(
+            cls: CharacterClass,
+            elem: ElementTag,
+            align: CharacterAlignment
+        ): UltimateArchetype = when {
+            elem == ElementTag.FIRE -> UltimateArchetype.HAZARD_STORM
+            elem == ElementTag.MAGIC && align == CharacterAlignment.ANTAGONIST -> UltimateArchetype.GRAVITY_CRUSH
+            elem == ElementTag.MAGIC -> UltimateArchetype.DOMAIN_STUN
+            cls == CharacterClass.CONTROL_MAGIC -> UltimateArchetype.TIME_STOP
+            align == CharacterAlignment.ANTAGONIST && elem == ElementTag.HEAVY -> UltimateArchetype.METEOR_NUKE
+            else -> UltimateArchetype.HYPER_AWAKEN
+        }
+    }
+}
+
+/**
+ * Concise factory helper used by our expansion packs to create rich, fully-specified
+ * anime fighters with authentic passives, ultimates, visuals, and inflated costs.
+ */
+fun fighter(
+    id: String,
+    name: String,
+    title: String,
+    anime: String,
+    align: CharacterAlignment,
+    tier: AnimeTier,
+    cls: CharacterClass,
+    elem: ElementTag,
+    hp: Int,
+    dmg: Int,
+    spd: Float,
+    mass: Float,
+    c1: Long,
+    c2: Long,
+    aura: Long,
+    hair: Long,
+    weapon: WeaponVisualType,
+    passiveType: PassiveArchetype,
+    passiveName: String,
+    passiveDesc: String,
+    ultType: UltimateArchetype,
+    ultName: String,
+    ultDur: Float,
+    ultCd: Float,
+    ultMult: Float,
+    ultDesc: String,
+    quote: String,
+    costGold: Int,
+    eye: EyeVisualStyle? = null,
+    crown: CrownVisualStyle? = null,
+    mark: FaceMarkVisualStyle? = null,
+    cape: Boolean = false
+): CharacterData = CharacterData(
+    id = id,
+    name = name,
+    title = title,
+    animeInspiration = anime,
+    alignment = align,
+    popularityTier = tier,
+    classType = cls,
+    element = elem,
+    maxHp = hp,
+    baseDamage = dmg,
+    speedRating = spd,
+    massRating = mass,
+    primaryColor = Color(c1),
+    secondaryColor = Color(c2),
+    auraColor = Color(aura),
+    hairColor = Color(hair),
+    weaponType = weapon,
+    passiveArchetype = passiveType,
+    ultimateArchetype = ultType,
+    passiveName = passiveName,
+    passiveDescription = passiveDesc,
+    ultimateName = ultName,
+    ultimateDurationSeconds = ultDur,
+    ultimateCooldownSeconds = ultCd,
+    ultimateDamageMultiplier = ultMult,
+    ultimateDescription = ultDesc,
+    voiceLine = quote,
+    unlockCostGold = costGold,
+    eyeStyle = eye,
+    crownStyle = crown,
+    faceMarkStyle = mark,
+    hasCapeOrWings = cape
 )
 
 object CharacterRoster {
     private val coreRoster = listOf(
-        // 1. STARTER: Kakarot Z (Protagonist • Popular)
+        // 1. STARTER: Kakarot (Dragon Ball Z)
         CharacterData(
             id = "kakarot_z",
             name = "Kakarot",
@@ -94,365 +429,407 @@ object CharacterRoster {
             popularityTier = AnimeTier.POPULAR,
             classType = CharacterClass.ATTACKER,
             element = ElementTag.HEAVY,
-            baseDamage = 15,
-            speedRating = 1.24f,
-            massRating = 1.45f,
+            maxHp = 370,
+            baseDamage = 14,
+            speedRating = 1.25f,
+            massRating = 1.48f,
             primaryColor = Color(0xFFF97316),
             secondaryColor = Color(0xFF1D4ED8),
             auraColor = Color(0xFFFACC15),
             hairColor = Color(0xFF18181B),
             weaponType = WeaponVisualType.KI_HALO,
+            passiveArchetype = PassiveArchetype.SHOCKWAVE_KNOCKBACK,
+            ultimateArchetype = UltimateArchetype.HYPER_AWAKEN,
             passiveName = "Ki Shockwave",
-            passiveDescription = "Direct impacts blast rivals away with +40% bonus knockback velocity.",
+            passiveDescription = "Blasts rivals away with +38% knockback impulse and +4 shockwave bonus damage.",
             ultimateName = "Ultra Awakening",
             ultimateDurationSeconds = 5.5f,
             ultimateCooldownSeconds = 8.5f,
-            ultimateDamageMultiplier = 1.85f,
-            ultimateDescription = "Transforms hair to radiant cyan-silver, boosting speed +30% and collision damage 1.85x.",
+            ultimateDamageMultiplier = 1.65f,
+            ultimateDescription = "Transforms hair to radiant silver-cyan, boosting speed +30% and collision power 1.65x.",
             voiceLine = "This is what lies beyond my limit!",
             unlockCostGold = 0,
             isStarter = true
         ),
-        // 2. STARTER: Kamado (Protagonist • Popular)
+        // 2. STARTER: Kamado (Demon Slayer)
         CharacterData(
             id = "kamado_sun",
-            name = "Kamado",
+            name = "Tanjiro",
             title = "Sun Breather",
             animeInspiration = "Demon Slayer",
             alignment = CharacterAlignment.PROTAGONIST,
             popularityTier = AnimeTier.POPULAR,
             classType = CharacterClass.SPEEDSTER,
             element = ElementTag.SLASH,
+            maxHp = 350,
             baseDamage = 12,
             speedRating = 1.38f,
-            massRating = 1.05f,
+            massRating = 1.08f,
             primaryColor = Color(0xFF10B981),
             secondaryColor = Color(0xFF18181B),
             auraColor = Color(0xFF38BDF8),
             hairColor = Color(0xFF7F1D1D),
             weaponType = WeaponVisualType.NICHIRIN_KATANA,
-            passiveName = "Crimson Slash",
-            passiveDescription = "Inflicts 4 ticks of Bleed (2 HP every 0.5s) after every sword collision.",
+            passiveArchetype = PassiveArchetype.CRIMSON_BLEED,
+            ultimateArchetype = UltimateArchetype.HAZARD_STORM,
+            passiveName = "Crimson Nichirin",
+            passiveDescription = "Inflicts 4 ticks of Crimson Bleed and +12% critical strike edge on sword clashes.",
             ultimateName = "Hinokami Kagura",
             ultimateDurationSeconds = 6.0f,
-            ultimateCooldownSeconds = 8.0f,
-            ultimateDamageMultiplier = 1.45f,
+            ultimateCooldownSeconds = 8.5f,
+            ultimateDamageMultiplier = 1.50f,
             ultimateDescription = "Ignites Nichirin blade, leaving blazing sun-fire zones across the court.",
             voiceLine = "Set your heart ablaze—Hinokami Dance!",
             unlockCostGold = 0,
             isStarter = true
         ),
-        // 3. STARTER: Hatake (Protagonist • Popular)
+        // 3. STARTER: Kakashi (Naruto)
         CharacterData(
             id = "raikiri_shinobi",
-            name = "Hatake",
-            title = "Copy Shinobi",
+            name = "Kakashi",
+            title = "Copy Ninja",
             animeInspiration = "Naruto Shippuden",
             alignment = CharacterAlignment.PROTAGONIST,
             popularityTier = AnimeTier.POPULAR,
             classType = CharacterClass.SPEEDSTER,
             element = ElementTag.ELEC,
+            maxHp = 340,
             baseDamage = 13,
-            speedRating = 1.48f,
-            massRating = 0.95f,
+            speedRating = 1.46f,
+            massRating = 0.98f,
             primaryColor = Color(0xFF334155),
             secondaryColor = Color(0xFF0F172A),
             auraColor = Color(0xFF38BDF8),
             hairColor = Color(0xFFE2E8F0),
             weaponType = WeaponVisualType.LIGHTNING_KUNAI,
+            passiveArchetype = PassiveArchetype.LIGHTNING_PARALYZE,
+            ultimateArchetype = UltimateArchetype.HYPER_AWAKEN,
             passiveName = "Chidori Jolt",
-            passiveDescription = "Briefly disrupts rival momentum for 0.25s on direct lightning impact.",
+            passiveDescription = "Paralyzes rival momentum for 0.25s on direct lightning impact and boosts agility.",
             ultimateName = "Kamui Overdrive",
-            ultimateDurationSeconds = 5.0f,
-            ultimateCooldownSeconds = 7.5f,
-            ultimateDamageMultiplier = 1.40f,
+            ultimateDurationSeconds = 5.5f,
+            ultimateCooldownSeconds = 8.0f,
+            ultimateDamageMultiplier = 1.48f,
             ultimateDescription = "Accelerates every wall ricochet by +8% up to hyper-sonic arena speed.",
-            voiceLine = "Lightning Blade—thousand birds!",
+            voiceLine = "Lightning Blade—one thousand birds!",
             unlockCostGold = 0,
             isStarter = true
         ),
-        // 4. STARTER: Mugiwara (Protagonist • Popular)
+        // 4. STARTER: Luffy (One Piece)
         CharacterData(
             id = "mugiwara_joy",
-            name = "Mugiwara",
-            title = "Sun Captain",
+            name = "Luffy",
+            title = "Sun God Captain",
             animeInspiration = "One Piece",
             alignment = CharacterAlignment.PROTAGONIST,
             popularityTier = AnimeTier.POPULAR,
             classType = CharacterClass.SPEEDSTER,
             element = ElementTag.HEAVY,
-            baseDamage = 14,
+            maxHp = 365,
+            baseDamage = 13,
             speedRating = 1.42f,
-            massRating = 1.15f,
+            massRating = 1.16f,
             primaryColor = Color(0xFFEF4444),
             secondaryColor = Color(0xFFFACC15),
             auraColor = Color(0xFFF43F5E),
             hairColor = Color(0xFF18181B),
             weaponType = WeaponVisualType.GOMU_FIST,
+            passiveArchetype = PassiveArchetype.ELASTIC_MOMENTUM,
+            ultimateArchetype = UltimateArchetype.HYPER_AWAKEN,
             passiveName = "Rubber Snapback",
-            passiveDescription = "Gains a temporary +18% slingshot speed burst off every wall rebound.",
-            ultimateName = "Gear Fifth",
+            passiveDescription = "Gains +20% slingshot speed burst off every wall bounce and +50% bank-shot power.",
+            ultimateName = "Gear Fifth: Nika",
             ultimateDurationSeconds = 5.5f,
-            ultimateCooldownSeconds = 8.0f,
-            ultimateDamageMultiplier = 1.65f,
-            ultimateDescription = "Awakens cloud-white form, emitting liberation shockwaves on every bounce.",
+            ultimateCooldownSeconds = 8.5f,
+            ultimateDamageMultiplier = 1.60f,
+            ultimateDescription = "Awakens cloud-white Sun God form, emitting liberation shockwaves on every bounce.",
             voiceLine = "The drums of liberation are beating!",
             unlockCostGold = 0,
             isStarter = true
         ),
-        // 5. Shigaraki (Antagonist • Popular)
+        // 5. Shigaraki
         CharacterData(
             id = "shigaraki_decay",
             name = "Shigaraki",
-            title = "Symbol of Decay",
+            title = "Symbol of Fear",
             animeInspiration = "My Hero Academia",
             alignment = CharacterAlignment.ANTAGONIST,
             popularityTier = AnimeTier.POPULAR,
             classType = CharacterClass.CONTROL_MAGIC,
             element = ElementTag.MAGIC,
-            baseDamage = 15,
-            speedRating = 1.34f,
-            massRating = 1.25f,
+            maxHp = 365,
+            baseDamage = 14,
+            speedRating = 1.32f,
+            massRating = 1.28f,
             primaryColor = Color(0xFF334155),
             secondaryColor = Color(0xFF7F1D1D),
-            auraColor = Color(0xFFA855F7),
-            hairColor = Color(0xFFBAE6FD),
-            weaponType = WeaponVisualType.DRAGON_CLAW,
+            auraColor = Color(0xFFEF4444),
+            hairColor = Color(0xFFE2E8F0),
+            weaponType = WeaponVisualType.CURSED_CLEAVE,
+            passiveArchetype = PassiveArchetype.CRIMSON_BLEED,
+            ultimateArchetype = UltimateArchetype.HAZARD_STORM,
             passiveName = "Decay Touch",
-            passiveDescription = "Inflicts 4 ticks of crumbling Decay bleed and shatters defender shields.",
-            ultimateName = "All For One Ruin",
-            ultimateDurationSeconds = 5.0f,
-            ultimateCooldownSeconds = 8.0f,
-            ultimateDamageMultiplier = 1.75f,
-            ultimateDescription = "Spreads Decay hazard pools across the floor and boosts damage 1.75x.",
-            voiceLine = "Everything your heroes built will crumble to dust!",
-            unlockCostGold = 250
+            passiveDescription = "Ignores shields and inflicts 4 ticks of crumbling Decay damage on contact.",
+            ultimateName = "All For Decay",
+            ultimateDurationSeconds = 5.5f,
+            ultimateCooldownSeconds = 9.0f,
+            ultimateDamageMultiplier = 1.55f,
+            ultimateDescription = "Spreads crumbling decay zones across the court on activation and movement.",
+            voiceLine = "Everything my fingers touch turns to dust!",
+            unlockCostGold = 6_500,
+            hasCapeOrWings = true
         ),
-        // 6. Midoriya (Protagonist • Popular)
+        // 6. Deku / Midoriya
         CharacterData(
             id = "midoriya_ofa",
             name = "Midoriya",
-            title = "Ninth Torchbearer",
+            title = "Ninth Inheritor",
             animeInspiration = "My Hero Academia",
             alignment = CharacterAlignment.PROTAGONIST,
             popularityTier = AnimeTier.POPULAR,
             classType = CharacterClass.SPEEDSTER,
             element = ElementTag.HEAVY,
+            maxHp = 355,
             baseDamage = 14,
-            speedRating = 1.42f,
-            massRating = 1.20f,
-            primaryColor = Color(0xFF0F766E),
-            secondaryColor = Color(0xFF18181B),
+            speedRating = 1.44f,
+            massRating = 1.24f,
+            primaryColor = Color(0xFF15803D),
+            secondaryColor = Color(0xFF0F172A),
             auraColor = Color(0xFF34D399),
             hairColor = Color(0xFF064E3B),
-            weaponType = WeaponVisualType.STAR_FISTS,
-            passiveName = "Fa Jin Kinetic Store",
-            passiveDescription = "Stores extra kinetic energy per wall bounce (+3 DMG/bounce up to +12).",
+            weaponType = WeaponVisualType.SERIOUS_GLOVE,
+            passiveArchetype = PassiveArchetype.ELASTIC_MOMENTUM,
+            ultimateArchetype = UltimateArchetype.HYPER_AWAKEN,
+            passiveName = "Fa Jin Kinetic Bank",
+            passiveDescription = "Stores kinetic energy per wall bounce for +50% stronger bank-shot smashes.",
             ultimateName = "Gearshift Overdrive",
             ultimateDurationSeconds = 5.5f,
-            ultimateCooldownSeconds = 8.0f,
-            ultimateDamageMultiplier = 1.75f,
-            ultimateDescription = "Breaks inertia laws for +36% arena speed and 1.75x Smash impacts.",
+            ultimateCooldownSeconds = 8.5f,
+            ultimateDamageMultiplier = 1.62f,
+            ultimateDescription = "Breaks inertia laws with +36% hyper-speed and 1.62x Detroit Smash power.",
             voiceLine = "One For All—Full Cowling 100%!",
-            unlockCostGold = 250
+            unlockCostGold = 7_200,
+            hasCapeOrWings = true
         ),
-        // 7. Roronoa (Protagonist • Popular)
+        // 7. Zoro
         CharacterData(
             id = "roronoa_ashura",
-            name = "Roronoa",
-            title = "Three-Sword Demon",
+            name = "Zoro",
+            title = "King of Hell",
             animeInspiration = "One Piece",
             alignment = CharacterAlignment.PROTAGONIST,
             popularityTier = AnimeTier.POPULAR,
             classType = CharacterClass.ATTACKER,
             element = ElementTag.SLASH,
-            baseDamage = 16,
-            speedRating = 1.30f,
-            massRating = 1.35f,
-            primaryColor = Color(0xFF15803D),
-            secondaryColor = Color(0xFF052E16),
-            auraColor = Color(0xFF4ADE80),
+            maxHp = 385,
+            baseDamage = 15,
+            speedRating = 1.28f,
+            massRating = 1.45f,
+            primaryColor = Color(0xFF166534),
+            secondaryColor = Color(0xFF18181B),
+            auraColor = Color(0xFF22C55E),
             hairColor = Color(0xFF22C55E),
             weaponType = WeaponVisualType.TRIPLE_KATANA,
-            passiveName = "Santoryu Rend",
-            passiveDescription = "Three orbiting blades widen strike reach and stack 3-tick Bleed.",
-            ultimateName = "King of Hell",
-            ultimateDurationSeconds = 5.0f,
-            ultimateCooldownSeconds = 8.0f,
-            ultimateDamageMultiplier = 1.80f,
-            ultimateDescription = "Coats all three katanas in emerald conqueror lightning for 1.8x slash damage.",
-            voiceLine = "Three-Sword Serpent—Purgatory Onigiri!",
-            unlockCostGold = 300
+            passiveArchetype = PassiveArchetype.CRIMSON_BLEED,
+            ultimateArchetype = UltimateArchetype.HYPER_AWAKEN,
+            passiveName = "Santoryu Reach",
+            passiveDescription = "Extended 3-sword hitbox inflicts deep Bleed and +12% critical slash damage.",
+            ultimateName = "King of Hell: Ashura",
+            ultimateDurationSeconds = 5.5f,
+            ultimateCooldownSeconds = 8.5f,
+            ultimateDamageMultiplier = 1.68f,
+            ultimateDescription = "Coats all three katanas in emerald Conqueror aura for 1.68x slash damage.",
+            voiceLine = "Three-Sword Serpent—Ashura Blades Drawn!",
+            unlockCostGold = 8_500
         ),
-        // 8. Dragneel (Protagonist • Popular)
+        // 8. Natsu
         CharacterData(
             id = "dragneel_ignis",
-            name = "Dragneel",
-            title = "Salamander Slayer",
+            name = "Natsu",
+            title = "Salamander",
             animeInspiration = "Fairy Tail",
             alignment = CharacterAlignment.PROTAGONIST,
             popularityTier = AnimeTier.POPULAR,
             classType = CharacterClass.ATTACKER,
             element = ElementTag.FIRE,
-            baseDamage = 15,
-            speedRating = 1.34f,
-            massRating = 1.25f,
-            primaryColor = Color(0xFFDC2626),
-            secondaryColor = Color(0xFFF59E0B),
+            maxHp = 375,
+            baseDamage = 14,
+            speedRating = 1.32f,
+            massRating = 1.38f,
+            primaryColor = Color(0xFFE11D48),
+            secondaryColor = Color(0xFFF8FAFC),
             auraColor = Color(0xFFF97316),
             hairColor = Color(0xFFF472B6),
             weaponType = WeaponVisualType.DRAGON_CLAW,
-            passiveName = "Dragon Roar Ember",
-            passiveDescription = "Drops a scorching magma pool beneath rivals upon direct impact.",
-            ultimateName = "Dragon Force",
-            ultimateDurationSeconds = 5.0f,
-            ultimateCooldownSeconds = 7.5f,
-            ultimateDamageMultiplier = 1.65f,
-            ultimateDescription = "Every wall bounce erupts a fresh magma hazard across the perimeter.",
+            passiveArchetype = PassiveArchetype.SCORCH_BURN,
+            ultimateArchetype = UltimateArchetype.HAZARD_STORM,
+            passiveName = "Dragon Slayer Flame",
+            passiveDescription = "Ignites the court on impact, scorching rivals with lingering dragon fire.",
+            ultimateName = "Fire Dragon King Mode",
+            ultimateDurationSeconds = 5.5f,
+            ultimateCooldownSeconds = 8.5f,
+            ultimateDamageMultiplier = 1.60f,
+            ultimateDescription = "Erupts blazing inferno craters on activation and every wall bounce.",
             voiceLine = "I'm all fired up now!",
-            unlockCostGold = 300
+            unlockCostGold = 9_200
         ),
-        // 9. Satoru (Protagonist • Popular)
+        // 9. Gojo Satoru
         CharacterData(
             id = "satoru_void",
-            name = "Satoru",
-            title = "Limitless Sorcerer",
+            name = "Gojo",
+            title = "The Honored One",
             animeInspiration = "Jujutsu Kaisen",
             alignment = CharacterAlignment.PROTAGONIST,
             popularityTier = AnimeTier.POPULAR,
             classType = CharacterClass.CONTROL_MAGIC,
             element = ElementTag.MAGIC,
-            baseDamage = 16,
-            speedRating = 1.26f,
-            massRating = 1.65f,
-            primaryColor = Color(0xFF1E1B4B),
-            secondaryColor = Color(0xFF09090B),
-            auraColor = Color(0xFF818CF8),
+            maxHp = 380,
+            baseDamage = 14,
+            speedRating = 1.36f,
+            massRating = 1.35f,
+            primaryColor = Color(0xFF1E293B),
+            secondaryColor = Color(0xFF0F172A),
+            auraColor = Color(0xFF38BDF8),
             hairColor = Color(0xFFF8FAFC),
             weaponType = WeaponVisualType.LIMITLESS_ORBS,
-            passiveName = "Infinity Barrier",
-            passiveDescription = "Dampens incoming collision damage by 20% via spatial repulsion.",
+            passiveArchetype = PassiveArchetype.INFINITY_BARRIER,
+            ultimateArchetype = UltimateArchetype.DOMAIN_STUN,
+            passiveName = "Limitless Infinity",
+            passiveDescription = "Spatial distortion barrier reduces all incoming collision damage by 22%.",
             ultimateName = "Unlimited Void",
-            ultimateDurationSeconds = 4.5f,
-            ultimateCooldownSeconds = 9.0f,
-            ultimateDamageMultiplier = 1.50f,
-            ultimateDescription = "Locks the rival sphere frozen in space for 1.5s for free ricochet combos.",
-            voiceLine = "Domain Expansion: Unlimited Void.",
-            unlockCostGold = 350
+            ultimateDurationSeconds = 5.0f,
+            ultimateCooldownSeconds = 9.5f,
+            ultimateDamageMultiplier = 1.62f,
+            ultimateDescription = "Paralyzes the rival sphere inside Unlimited Void for 1.55s and unleashes Hollow Purple.",
+            voiceLine = "Throughout Heaven and Earth, I alone am the honored one.",
+            unlockCostGold = 42_000
         ),
-        // 10. Frieza (Antagonist • Popular)
+        // 10. Frieza
         CharacterData(
             id = "frieza_emperor",
             name = "Frieza",
-            title = "Galactic Emperor",
-            animeInspiration = "Dragon Ball Z",
+            title = "Galactic Tyrant",
+            animeInspiration = "Dragon Ball Super",
             alignment = CharacterAlignment.ANTAGONIST,
             popularityTier = AnimeTier.POPULAR,
             classType = CharacterClass.SPEEDSTER,
             element = ElementTag.MAGIC,
+            maxHp = 360,
             baseDamage = 15,
             speedRating = 1.44f,
-            massRating = 1.15f,
+            massRating = 1.26f,
             primaryColor = Color(0xFFF8FAFC),
             secondaryColor = Color(0xFF7E22CE),
-            auraColor = Color(0xFFC084FC),
+            auraColor = Color(0xFFA855F7),
             hairColor = Color(0x00000000),
             weaponType = WeaponVisualType.KI_HALO,
-            passiveName = "Death Beam Piercer",
-            passiveDescription = "High-velocity strikes deal +4 bonus supernova pierce damage.",
+            passiveArchetype = PassiveArchetype.EXECUTE_SHRINE,
+            ultimateArchetype = UltimateArchetype.HYPER_AWAKEN,
+            passiveName = "Imperial Cruelty",
+            passiveDescription = "Deals +30% ruthless execution damage against weakened rivals below 50% HP.",
             ultimateName = "Golden Emperor",
             ultimateDurationSeconds = 5.5f,
             ultimateCooldownSeconds = 8.5f,
-            ultimateDamageMultiplier = 1.80f,
-            ultimateDescription = "Ascends into Golden form: +32% velocity and 1.80x ruthless impact damage.",
-            voiceLine = "Bow before Golden Frieza!",
-            unlockCostGold = 350
+            ultimateDamageMultiplier = 1.66f,
+            ultimateDescription = "Transforms into gleaming Golden Frieza with +32% speed and 1.66x Death Beam force.",
+            voiceLine = "Kneel before Golden Frieza!",
+            unlockCostGold = 24_000
         ),
-        // 11. Denji (Protagonist • Popular)
+        // 11. Denji / Chainsaw Man
         CharacterData(
             id = "chainsaw_devil",
             name = "Denji",
-            title = "Ripcord Hybrid",
+            title = "Chainsaw Hybrid",
             animeInspiration = "Chainsaw Man",
             alignment = CharacterAlignment.PROTAGONIST,
             popularityTier = AnimeTier.POPULAR,
             classType = CharacterClass.ATTACKER,
             element = ElementTag.SLASH,
-            baseDamage = 15,
+            maxHp = 375,
+            baseDamage = 14,
             speedRating = 1.36f,
-            massRating = 1.25f,
+            massRating = 1.38f,
             primaryColor = Color(0xFFEA580C),
-            secondaryColor = Color(0xFF27272A),
+            secondaryColor = Color(0xFF18181B),
             auraColor = Color(0xFFEF4444),
-            hairColor = Color(0xFFFDE047),
+            hairColor = Color(0xFFFACC15),
             weaponType = WeaponVisualType.CHAINSAW_BLADE,
+            passiveArchetype = PassiveArchetype.VAMPIRIC_SIPHON,
+            ultimateArchetype = UltimateArchetype.SOUL_DEVOUR,
             passiveName = "Blood Engine",
-            passiveDescription = "Revs chainsaw teeth on hit, restoring +3 HP on every direct collision.",
-            ultimateName = "Full Devil Rev",
+            passiveDescription = "Revving chainsaws siphon 28% of collision damage dealt back as fresh HP.",
+            ultimateName = "Hero of Hell",
             ultimateDurationSeconds = 5.5f,
-            ultimateCooldownSeconds = 8.0f,
+            ultimateCooldownSeconds = 8.5f,
             ultimateDamageMultiplier = 1.60f,
-            ultimateDescription = "Frenzied overdrive: +28% velocity and doubles Blood Engine healing to +6 HP/hit.",
-            voiceLine = "Pull the cord and shred everything!",
-            unlockCostGold = 400
+            ultimateDescription = "Full devil rev drains rival vitality on activation and boosts speed +28%.",
+            voiceLine = "Pull the starter cord—roar, Chainsaw!",
+            unlockCostGold = 15_000
         ),
-        // 12. Elric (Protagonist • Popular)
+        // 12. Edward Elric
         CharacterData(
             id = "elric_fullmetal",
-            name = "Elric",
+            name = "Edward",
             title = "Fullmetal Alchemist",
-            animeInspiration = "Fullmetal Alchemist",
+            animeInspiration = "Fullmetal Alchemist: Brotherhood",
             alignment = CharacterAlignment.PROTAGONIST,
             popularityTier = AnimeTier.POPULAR,
             classType = CharacterClass.CONTROL_MAGIC,
             element = ElementTag.HEAVY,
-            baseDamage = 14,
+            maxHp = 370,
+            baseDamage = 13,
             speedRating = 1.32f,
             massRating = 1.40f,
-            primaryColor = Color(0xFFB91C1C),
-            secondaryColor = Color(0xFF3F3F46),
-            auraColor = Color(0xFFFBBF24),
+            primaryColor = Color(0xFFDC2626),
+            secondaryColor = Color(0xFF18181B),
+            auraColor = Color(0xFF38BDF8),
             hairColor = Color(0xFFFACC15),
             weaponType = WeaponVisualType.ALCHEMY_SPEAR,
+            passiveArchetype = PassiveArchetype.VECTOR_REFLECT,
+            ultimateArchetype = UltimateArchetype.HEAL_REFORGE,
             passiveName = "Equivalent Exchange",
-            passiveDescription = "Automail counter-transmutation reflects 25% of incoming impact damage.",
-            ultimateName = "Philosopher's Surge",
-            ultimateDurationSeconds = 4.5f,
-            ultimateCooldownSeconds = 8.0f,
-            ultimateDamageMultiplier = 1.55f,
-            ultimateDescription = "Instantly repairs +12 HP and charges transmutation spear with 1.55x force.",
-            voiceLine = "Humankind cannot gain without giving in return!",
-            unlockCostGold = 400
+            passiveDescription = "Automail counter-transmutation reflects 26% of incoming collision damage back.",
+            ultimateName = "Truth Transmutation",
+            ultimateDurationSeconds = 5.0f,
+            ultimateCooldownSeconds = 8.5f,
+            ultimateDamageMultiplier = 1.52f,
+            ultimateDescription = "Reforges armor to restore +48 HP immediately and amplify spear strikes.",
+            voiceLine = "A lesson without pain is meaningless!",
+            unlockCostGold = 13_500,
+            hasCapeOrWings = true
         ),
-        // 13. Muzan (Antagonist • Popular)
+        // 13. Muzan Kibutsuji
         CharacterData(
             id = "muzan_progenitor",
             name = "Muzan",
-            title = "Demon Progenitor",
+            title = "Demon King",
             animeInspiration = "Demon Slayer",
             alignment = CharacterAlignment.ANTAGONIST,
             popularityTier = AnimeTier.POPULAR,
             classType = CharacterClass.ATTACKER,
             element = ElementTag.SLASH,
-            baseDamage = 16,
-            speedRating = 1.36f,
-            massRating = 1.40f,
+            maxHp = 395,
+            baseDamage = 15,
+            speedRating = 1.35f,
+            massRating = 1.45f,
             primaryColor = Color(0xFF18181B),
             secondaryColor = Color(0xFF991B1B),
             auraColor = Color(0xFFE11D48),
             hairColor = Color(0xFF09090B),
             weaponType = WeaponVisualType.CURSED_CLEAVE,
-            passiveName = "Immortal Flesh",
-            passiveDescription = "Regenerates +3 HP on hit and injects 3 ticks of cellular demon toxin.",
-            ultimateName = "Biokinesis Whip Storm",
-            ultimateDurationSeconds = 5.0f,
-            ultimateCooldownSeconds = 8.5f,
-            ultimateDamageMultiplier = 1.75f,
-            ultimateDescription = "Lashes scarlet spine-whips for 1.75x damage and +6 HP siphon per clash.",
-            voiceLine = "I am perfection—a natural disaster!",
-            unlockCostGold = 420
+            passiveArchetype = PassiveArchetype.VAMPIRIC_SIPHON,
+            ultimateArchetype = UltimateArchetype.SOUL_DEVOUR,
+            passiveName = "Demon Progenitor Blood",
+            passiveDescription = "Siphons rival life force on every whip clash and regenerates cellular damage.",
+            ultimateName = "Biokinesis Tempest",
+            ultimateDurationSeconds = 5.5f,
+            ultimateCooldownSeconds = 9.0f,
+            ultimateDamageMultiplier = 1.64f,
+            ultimateDescription = "Drains rival HP & Ultimate gauge while unleashing 1.64x demon whip fury.",
+            voiceLine = "I am a natural disaster—bow and perish.",
+            unlockCostGold = 28_000
         ),
-        // 14. Asta (Protagonist • Popular)
+        // 14. Asta
         CharacterData(
             id = "asta_grimoire",
             name = "Asta",
@@ -462,193 +839,217 @@ object CharacterRoster {
             popularityTier = AnimeTier.POPULAR,
             classType = CharacterClass.ATTACKER,
             element = ElementTag.SLASH,
-            baseDamage = 16,
-            speedRating = 1.35f,
+            maxHp = 380,
+            baseDamage = 14,
+            speedRating = 1.36f,
             massRating = 1.50f,
             primaryColor = Color(0xFF27272A),
             secondaryColor = Color(0xFF991B1B),
-            auraColor = Color(0xFFDC2626),
+            auraColor = Color(0xFFEF4444),
             hairColor = Color(0xFFD4D4D8),
             weaponType = WeaponVisualType.GRIMOIRE_GREATSWORD,
+            passiveArchetype = PassiveArchetype.ANTI_MAGIC_DRAIN,
+            ultimateArchetype = UltimateArchetype.ULT_NULLIFY,
             passiveName = "Anti-Magic Sever",
-            passiveDescription = "Drains 12% of the rival's Ultimate gauge on every direct sword clash.",
-            ultimateName = "Black Divider",
-            ultimateDurationSeconds = 5.0f,
-            ultimateCooldownSeconds = 8.0f,
-            ultimateDamageMultiplier = 1.75f,
-            ultimateDescription = "Cancels any active rival Ultimate into cooldown and cleaves for 1.75x damage.",
+            passiveDescription = "Every greatsword hit burns 11% off the rival's Ultimate meter.",
+            ultimateName = "Devil Union: Black Divider",
+            ultimateDurationSeconds = 5.5f,
+            ultimateCooldownSeconds = 8.5f,
+            ultimateDamageMultiplier = 1.62f,
+            ultimateDescription = "Cancels any active rival Awakening immediately and boosts slash force 1.62x!",
             voiceLine = "My magic is never giving up!",
-            unlockCostGold = 450
+            unlockCostGold = 16_500,
+            hasCapeOrWings = true
         ),
-        // 15. Okarun (Protagonist • Popular)
+        // 15. Okarun
         CharacterData(
             id = "okarun_turbo",
             name = "Okarun",
-            title = "Turbo Cursed",
+            title = "Turbo Curse Vessel",
             animeInspiration = "DanDaDan",
             alignment = CharacterAlignment.PROTAGONIST,
             popularityTier = AnimeTier.POPULAR,
             classType = CharacterClass.SPEEDSTER,
             element = ElementTag.ELEC,
-            baseDamage = 14,
+            maxHp = 335,
+            baseDamage = 13,
             speedRating = 1.52f,
-            massRating = 1.00f,
+            massRating = 1.05f,
             primaryColor = Color(0xFF18181B),
             secondaryColor = Color(0xFFDC2626),
             auraColor = Color(0xFFEF4444),
             hairColor = Color(0xFFF8FAFC),
-            weaponType = WeaponVisualType.GOMU_FIST,
+            weaponType = WeaponVisualType.KI_HALO,
+            passiveArchetype = PassiveArchetype.ELASTIC_MOMENTUM,
+            ultimateArchetype = UltimateArchetype.HYPER_AWAKEN,
             passiveName = "100 km/h Sprint",
-            passiveDescription = "Accelerates by +20% for 0.8s after every perimeter wall rebound.",
-            ultimateName = "All-Out Turbo",
+            passiveDescription = "Explodes off arena walls with +20% Turbo Granny acceleration and bank damage.",
+            ultimateName = "All-Out Turbo Throttle",
             ultimateDurationSeconds = 5.0f,
-            ultimateCooldownSeconds = 7.5f,
-            ultimateDamageMultiplier = 1.70f,
-            ultimateDescription = "Full-throttle spiritual sprint: +40% speed and 1.70x torpedo impact.",
-            voiceLine = "Going all-out at full throttle, yo!",
-            unlockCostGold = 450
+            ultimateCooldownSeconds = 8.0f,
+            ultimateDamageMultiplier = 1.58f,
+            ultimateDescription = "Pushes curse output to maximum for +40% blitz velocity and crushing headbutts.",
+            voiceLine = "Going all-out at full throttle, yo...",
+            unlockCostGold = 18_000
         ),
-        // 16. Kurosaki (Protagonist • Popular)
+        // 16. Ichigo Kurosaki
         CharacterData(
             id = "kurosaki_hollow",
-            name = "Kurosaki",
-            title = "Hollow Reaper",
-            animeInspiration = "Bleach",
+            name = "Ichigo",
+            title = "Soul Reaper Vizard",
+            animeInspiration = "Bleach: TYBW",
             alignment = CharacterAlignment.PROTAGONIST,
             popularityTier = AnimeTier.POPULAR,
             classType = CharacterClass.SPEEDSTER,
             element = ElementTag.SLASH,
+            maxHp = 370,
             baseDamage = 15,
             speedRating = 1.44f,
-            massRating = 1.20f,
+            massRating = 1.32f,
             primaryColor = Color(0xFF18181B),
             secondaryColor = Color(0xFFDC2626),
             auraColor = Color(0xFFEF4444),
-            hairColor = Color(0xFFFB923C),
+            hairColor = Color(0xFFF97316),
             weaponType = WeaponVisualType.ZANGETSU_BLADE,
-            passiveName = "Getsuga Momentum",
-            passiveDescription = "Deals +4 bonus damage when moving faster than the rival sphere.",
-            ultimateName = "Tensa Bankai",
+            passiveArchetype = PassiveArchetype.BLACK_FLASH_CRIT,
+            ultimateArchetype = UltimateArchetype.HYPER_AWAKEN,
+            passiveName = "Getsuga Surge",
+            passiveDescription = "Every 3rd sword clash unleashes a guaranteed 1.45x critical Getsuga slash.",
+            ultimateName = "True Tensa Zangetsu",
             ultimateDurationSeconds = 5.5f,
-            ultimateCooldownSeconds = 8.0f,
-            ultimateDamageMultiplier = 1.70f,
-            ultimateDescription = "Dons Hollow mask & Bankai speed (+35% velocity, 1.7x Getsuga strikes).",
+            ultimateCooldownSeconds = 8.5f,
+            ultimateDamageMultiplier = 1.66f,
+            ultimateDescription = "Unleashes Bankai Shunpo speed (+35%) and 1.66x black-crimson Getsuga strikes.",
             voiceLine = "Bankai—Tensa Zangetsu!",
-            unlockCostGold = 500
+            unlockCostGold = 22_000
         ),
-        // 17. Aizen (Antagonist • Popular)
+        // 17. Sosuke Aizen
         CharacterData(
             id = "aizen_kyoka",
             name = "Aizen",
-            title = "Hogyoku Sovereign",
-            animeInspiration = "Bleach",
+            title = "Transcendent Ruler",
+            animeInspiration = "Bleach: TYBW",
             alignment = CharacterAlignment.ANTAGONIST,
             popularityTier = AnimeTier.POPULAR,
             classType = CharacterClass.CONTROL_MAGIC,
             element = ElementTag.MAGIC,
-            baseDamage = 16,
-            speedRating = 1.35f,
-            massRating = 1.45f,
+            maxHp = 390,
+            baseDamage = 15,
+            speedRating = 1.34f,
+            massRating = 1.48f,
             primaryColor = Color(0xFFF8FAFC),
             secondaryColor = Color(0xFF4C1D95),
             auraColor = Color(0xFFA855F7),
             hairColor = Color(0xFF451A03),
             weaponType = WeaponVisualType.NICHIRIN_KATANA,
+            passiveArchetype = PassiveArchetype.INFINITY_BARRIER,
+            ultimateArchetype = UltimateArchetype.GRAVITY_CRUSH,
             passiveName = "Kyoka Suigetsu",
-            passiveDescription = "Illusionary deflection reduces incoming collision damage by 18%.",
-            ultimateName = "Kurohitsugi Coffin",
+            passiveDescription = "Complete Hypnosis misdirects blows, reducing incoming damage by 22%.",
+            ultimateName = "Hado #90: Kurohitsugi",
             ultimateDurationSeconds = 5.0f,
-            ultimateCooldownSeconds = 8.5f,
-            ultimateDamageMultiplier = 1.75f,
-            ultimateDescription = "Crushes the rival with -10 instant gravity damage and 1.75x Hogyoku slashes.",
-            voiceLine = "Since when were you under the impression you were winning?",
-            unlockCostGold = 520
+            ultimateCooldownSeconds = 9.0f,
+            ultimateDamageMultiplier = 1.65f,
+            ultimateDescription = "Crushes the rival inside a black gravity coffin (-24 instant HP + slow).",
+            voiceLine = "Shatter, Kyoka Suigetsu.",
+            unlockCostGold = 38_000,
+            hasCapeOrWings = true
         ),
-        // 18. Yeager (Antagonist • Popular)
+        // 18. Levi / Yeager Titan -> Eren / Titan Shifter
         CharacterData(
             id = "yeager_titan",
-            name = "Yeager",
-            title = "Rumbling Founder",
+            name = "Eren",
+            title = "Attack Titan",
             animeInspiration = "Attack on Titan",
-            alignment = CharacterAlignment.ANTAGONIST,
+            alignment = CharacterAlignment.PROTAGONIST,
             popularityTier = AnimeTier.POPULAR,
             classType = CharacterClass.ATTACKER,
             element = ElementTag.HEAVY,
-            baseDamage = 18,
-            speedRating = 1.18f,
-            massRating = 1.95f,
-            primaryColor = Color(0xFF57534E),
-            secondaryColor = Color(0xFF7C2D12),
+            maxHp = 425,
+            baseDamage = 15,
+            speedRating = 1.20f,
+            massRating = 1.92f,
+            primaryColor = Color(0xFF3F3F46),
+            secondaryColor = Color(0xFF7F1D1D),
             auraColor = Color(0xFF10B981),
-            hairColor = Color(0xFF292524),
+            hairColor = Color(0xFF27272A),
             weaponType = WeaponVisualType.TITAN_BLADES,
+            passiveArchetype = PassiveArchetype.TITAN_JUGGERNAUT,
+            ultimateArchetype = UltimateArchetype.METEOR_NUKE,
             passiveName = "Hardened Titan Mass",
-            passiveDescription = "Heavy crystal mass shrugs off enemy knockback while crushing lighter spheres.",
-            ultimateName = "Colossus Steam",
-            ultimateDurationSeconds = 4.5f,
-            ultimateCooldownSeconds = 8.5f,
-            ultimateDamageMultiplier = 1.60f,
-            ultimateDescription = "Emits scalding steam blast dealing 12 instant damage and heavy pushback.",
-            voiceLine = "Keep moving forward until every foe falls!",
-            unlockCostGold = 550
+            passiveDescription = "Colossal Titan mass resists knockback by 35% and crushes lighter spheres (+20% DMG).",
+            ultimateName = "Founding Rumbling",
+            ultimateDurationSeconds = 5.5f,
+            ultimateCooldownSeconds = 9.0f,
+            ultimateDamageMultiplier = 1.65f,
+            ultimateDescription = "Detonates a colossal steam quake (-26 instant HP + fiery crater).",
+            voiceLine = "I will keep moving forward!",
+            unlockCostGold = 21_000
         ),
-        // 19. Rimuru (Protagonist • Popular)
+        // 19. Rimuru Tempest
         CharacterData(
             id = "rimuru_tempest",
             name = "Rimuru",
-            title = "Chaos Slime Lord",
+            title = "Demon Lord Slime",
             animeInspiration = "Reincarnated as a Slime",
             alignment = CharacterAlignment.PROTAGONIST,
             popularityTier = AnimeTier.POPULAR,
             classType = CharacterClass.CONTROL_MAGIC,
             element = ElementTag.MAGIC,
+            maxHp = 390,
             baseDamage = 14,
-            speedRating = 1.40f,
-            massRating = 1.25f,
+            speedRating = 1.38f,
+            massRating = 1.30f,
             primaryColor = Color(0xFF38BDF8),
-            secondaryColor = Color(0xFF0284C7),
-            auraColor = Color(0xFF7DD3FC),
-            hairColor = Color(0xFFBAE6FD),
+            secondaryColor = Color(0xFF1E293B),
+            auraColor = Color(0xFF22D3EE),
+            hairColor = Color(0xFF7DD3FC),
             weaponType = WeaponVisualType.NICHIRIN_KATANA,
-            passiveName = "Predator Gel",
-            passiveDescription = "Elastic slime body gains +15% extra Ultimate charge and heals +2 HP every 3rd bounce.",
-            ultimateName = "Lord Beelzebuth",
+            passiveArchetype = PassiveArchetype.REGEN_IMMORTAL,
+            ultimateArchetype = UltimateArchetype.SOUL_DEVOUR,
+            passiveName = "Ultraspeed Regeneration",
+            passiveDescription = "Heals +2% Max HP every 3rd wall bounce and charges Ultimate 15% faster.",
+            ultimateName = "Lord of Gluttony: Beelzebuth",
             ultimateDurationSeconds = 5.5f,
-            ultimateCooldownSeconds = 8.0f,
-            ultimateDamageMultiplier = 1.70f,
-            ultimateDescription = "Devours 18% of rival's Ultimate meter on activation and deals 1.70x damage.",
-            voiceLine = "Devour it all—Gluttonous King Beelzebuth!",
-            unlockCostGold = 550
+            ultimateCooldownSeconds = 8.5f,
+            ultimateDamageMultiplier = 1.58f,
+            ultimateDescription = "Devours 22% of rival Ultimate meter and siphons HP on activation.",
+            voiceLine = "Raphael, analyze and devour!",
+            unlockCostGold = 26_000,
+            hasCapeOrWings = true
         ),
-        // 20. Killua (Protagonist • Popular)
+        // 20. Killua Zoldyck
         CharacterData(
             id = "killua_godspeed",
             name = "Killua",
-            title = "Zoldyck Prodigy",
+            title = "Godspeed Assassin",
             animeInspiration = "Hunter x Hunter",
             alignment = CharacterAlignment.PROTAGONIST,
             popularityTier = AnimeTier.POPULAR,
             classType = CharacterClass.SPEEDSTER,
             element = ElementTag.ELEC,
+            maxHp = 335,
             baseDamage = 13,
-            speedRating = 1.56f,
-            massRating = 0.90f,
-            primaryColor = Color(0xFF2563EB),
-            secondaryColor = Color(0xFF1E1B4B),
+            speedRating = 1.54f,
+            massRating = 1.02f,
+            primaryColor = Color(0xFFE2E8F0),
+            secondaryColor = Color(0xFF1E3A8A),
             auraColor = Color(0xFF60A5FA),
-            hairColor = Color(0xFFF1F5F9),
+            hairColor = Color(0xFFF8FAFC),
             weaponType = WeaponVisualType.ALLOY_YOYOS,
-            passiveName = "Narukami Arc",
-            passiveDescription = "Fastest base arena speed; shocks rivals for +3 bonus Volt damage.",
-            ultimateName = "Godspeed Whirlwind",
-            ultimateDurationSeconds = 5.0f,
+            passiveArchetype = PassiveArchetype.LIGHTNING_PARALYZE,
+            ultimateArchetype = UltimateArchetype.HYPER_AWAKEN,
+            passiveName = "Narukami Jolt",
+            passiveDescription = "Alloy yo-yo voltage micro-stuns rivals on impact and boosts reflex speed.",
+            ultimateName = "Kanmuru: Godspeed",
+            ultimateDurationSeconds = 5.5f,
             ultimateCooldownSeconds = 8.0f,
             ultimateDamageMultiplier = 1.55f,
-            ultimateDescription = "Reaches blinding lightning velocity (+40% speed) and halves incoming damage.",
-            voiceLine = "Godspeed: Whirlwind!",
-            unlockCostGold = 600
+            ultimateDescription = "Surges to +40% lightning speed while halving incoming collision damage.",
+            voiceLine = "Whirlwind—Godspeed!",
+            unlockCostGold = 19_500
         ),
-        // 21. Kafka (Protagonist • Popular)
+        // 21. Kafka Hibino
         CharacterData(
             id = "kafka_kaiju",
             name = "Kafka",
@@ -658,25 +1059,28 @@ object CharacterRoster {
             popularityTier = AnimeTier.POPULAR,
             classType = CharacterClass.ATTACKER,
             element = ElementTag.HEAVY,
-            baseDamage = 18,
-            speedRating = 1.24f,
-            massRating = 1.80f,
-            primaryColor = Color(0xFF1E293B),
-            secondaryColor = Color(0xFF0F172A),
+            maxHp = 415,
+            baseDamage = 15,
+            speedRating = 1.28f,
+            massRating = 1.78f,
+            primaryColor = Color(0xFF18181B),
+            secondaryColor = Color(0xFF0E7490),
             auraColor = Color(0xFF22D3EE),
             hairColor = Color(0xFF09090B),
             weaponType = WeaponVisualType.SERIOUS_GLOVE,
+            passiveArchetype = PassiveArchetype.SHOCKWAVE_KNOCKBACK,
+            ultimateArchetype = UltimateArchetype.SERIOUS_ONE_PUNCH,
             passiveName = "Fortitude 9.8",
-            passiveDescription = "Monstrous core adds +4 seismic impact damage on high-speed collisions.",
-            ultimateName = "Kaiju Pilebunker",
-            ultimateDurationSeconds = 4.5f,
-            ultimateCooldownSeconds = 8.0f,
-            ultimateDamageMultiplier = 1.85f,
-            ultimateDescription = "Unleashes a cyan-core shockwave blow with 1.85x colossal impact force.",
-            voiceLine = "I'll wipe out every last Kaiju standing in our way!",
-            unlockCostGold = 600
+            passiveDescription = "Kaiju muscle shockwaves blast rivals back with heavy seismic impact damage.",
+            ultimateName = "Defense Force Breaker",
+            ultimateDurationSeconds = 5.5f,
+            ultimateCooldownSeconds = 8.5f,
+            ultimateDamageMultiplier = 1.65f,
+            ultimateDescription = "Charges core to maximum output, arming a colossal 2.4x Kaiju megaton punch!",
+            voiceLine = "Full release—Fortitude 9.8!",
+            unlockCostGold = 17_500
         ),
-        // 22. Makima (Antagonist • Popular)
+        // 22. Makima
         CharacterData(
             id = "makima_control",
             name = "Makima",
@@ -686,53 +1090,60 @@ object CharacterRoster {
             popularityTier = AnimeTier.POPULAR,
             classType = CharacterClass.CONTROL_MAGIC,
             element = ElementTag.MAGIC,
-            baseDamage = 15,
+            maxHp = 375,
+            baseDamage = 14,
             speedRating = 1.32f,
             massRating = 1.35f,
             primaryColor = Color(0xFF18181B),
-            secondaryColor = Color(0xFF9F1239),
-            auraColor = Color(0xFFF43F5E),
+            secondaryColor = Color(0xFFF8FAFC),
+            auraColor = Color(0xFFDC2626),
             hairColor = Color(0xFFE11D48),
             weaponType = WeaponVisualType.LIMITLESS_ORBS,
-            passiveName = "Crimson Contract",
-            passiveDescription = "Redirects 25% of collision damage suffered back onto the attacker.",
+            passiveArchetype = PassiveArchetype.VECTOR_REFLECT,
+            ultimateArchetype = UltimateArchetype.GRAVITY_CRUSH,
+            passiveName = "Prime Minister Contract",
+            passiveDescription = "Transfers 26% of all damage suffered directly back onto the attacker.",
             ultimateName = "Ritual: Bang!",
             ultimateDurationSeconds = 5.0f,
-            ultimateCooldownSeconds = 8.5f,
-            ultimateDamageMultiplier = 1.65f,
-            ultimateDescription = "Fires an invisible concussive blast (-13 instant HP + violent wall knockback).",
-            voiceLine = "Say my name—Bang.",
-            unlockCostGold = 650
+            ultimateCooldownSeconds = 9.0f,
+            ultimateDamageMultiplier = 1.60f,
+            ultimateDescription = "Fires an invisible telekinetic Bang (-26 instant HP + heavy knockback).",
+            voiceLine = "Say my name... Bang.",
+            unlockCostGold = 36_000,
+            hasCapeOrWings = true
         ),
-        // 23. Kageyama (Protagonist • Cult)
+        // 23. Mob / Shigeo Kageyama
         CharacterData(
             id = "kageyama_esper",
-            name = "Kageyama",
+            name = "Mob",
             title = "100% Esper",
             animeInspiration = "Mob Psycho 100",
             alignment = CharacterAlignment.PROTAGONIST,
-            popularityTier = AnimeTier.CULT,
+            popularityTier = AnimeTier.POPULAR,
             classType = CharacterClass.CONTROL_MAGIC,
             element = ElementTag.MAGIC,
-            baseDamage = 15,
-            speedRating = 1.25f,
-            massRating = 1.50f,
-            primaryColor = Color(0xFF18181B),
-            secondaryColor = Color(0xFF4C1D95),
+            maxHp = 365,
+            baseDamage = 13,
+            speedRating = 1.30f,
+            massRating = 1.36f,
+            primaryColor = Color(0xFF1E1B4B),
+            secondaryColor = Color(0xFF312E81),
             auraColor = Color(0xFFA855F7),
             hairColor = Color(0xFF09090B),
             weaponType = WeaponVisualType.PSYCHIC_DEBRIS,
-            passiveName = "Esper Stress Meter",
-            passiveDescription = "Taking damage charges Kageyama's Ultimate meter 50% faster.",
+            passiveArchetype = PassiveArchetype.ARCANE_OVERCHARGE,
+            ultimateArchetype = UltimateArchetype.GRAVITY_CRUSH,
+            passiveName = "Emotional Vessel",
+            passiveDescription = "Builds Ultimate meter 35% faster whenever colliding or absorbing psychic stress.",
             ultimateName = "???% Explosion",
-            ultimateDurationSeconds = 5.0f,
+            ultimateDurationSeconds = 5.5f,
             ultimateCooldownSeconds = 8.5f,
-            ultimateDamageMultiplier = 1.95f,
-            ultimateDescription = "Unleashes overwhelming telekinetic pressure (1.95x impact + shockwave push).",
-            voiceLine = "100% — Psychic eruption!",
-            unlockCostGold = 650
+            ultimateDamageMultiplier = 1.72f,
+            ultimateDescription = "Unleashes ???% telekinetic storm, crushing the rival and piercing barriers.",
+            voiceLine = "100%... Psychic Explosion!",
+            unlockCostGold = 25_000
         ),
-        // 24. Teach / Blackbeard (Antagonist • Popular)
+        // 24. Blackbeard / Marshall D. Teach
         CharacterData(
             id = "blackbeard_tremor",
             name = "Teach",
@@ -742,35 +1153,47 @@ object CharacterRoster {
             popularityTier = AnimeTier.POPULAR,
             classType = CharacterClass.ATTACKER,
             element = ElementTag.HEAVY,
-            baseDamage = 17,
-            speedRating = 1.20f,
-            massRating = 1.85f,
+            maxHp = 430,
+            baseDamage = 15,
+            speedRating = 1.22f,
+            massRating = 1.88f,
             primaryColor = Color(0xFF1E1B4B),
             secondaryColor = Color(0xFF7F1D1D),
             auraColor = Color(0xFF9333EA),
             hairColor = Color(0xFF09090B),
             weaponType = WeaponVisualType.LIMITLESS_ORBS,
-            passiveName = "Dark Vortex",
-            passiveDescription = "Nullifies 10% of rival Ultimate meter on hit with crushing Yonko mass.",
+            passiveArchetype = PassiveArchetype.ANTI_MAGIC_DRAIN,
+            ultimateArchetype = UltimateArchetype.METEOR_NUKE,
+            passiveName = "Yami Yami Vortex",
+            passiveDescription = "Nullifies 11% of rival Ultimate meter on every collision with Yonko mass.",
             ultimateName = "Gura Gura Seaquake",
             ultimateDurationSeconds = 5.0f,
-            ultimateCooldownSeconds = 8.5f,
-            ultimateDamageMultiplier = 1.75f,
-            ultimateDescription = "Cracks the air for -12 instant quake damage and 1.75x tremor collisions.",
+            ultimateCooldownSeconds = 9.0f,
+            ultimateDamageMultiplier = 1.68f,
+            ultimateDescription = "Shatters the air for -26 instant quake damage and 1.68x tremor collisions.",
             voiceLine = "Zehahaha! Darkness swallows everything!",
-            unlockCostGold = 700
+            unlockCostGold = 34_000,
+            hasCapeOrWings = true
         )
     )
 
     val characters: List<CharacterData> by lazy {
-        coreRoster + RosterExpansion.expandedCharacters
+        coreRoster +
+            RosterExpansion.expandedCharacters +
+            RosterShonenLegends.characters +
+            RosterFantasyIsekai.characters +
+            RosterCultAndNiche.characters
     }
 
     val starterIds: Set<String> by lazy {
         characters.filter { it.isStarter }.map { it.id }.toSet()
     }
 
+    private val byIdMap: Map<String, CharacterData> by lazy {
+        characters.associateBy { it.id }
+    }
+
     fun getById(id: String): CharacterData {
-        return characters.firstOrNull { it.id == id } ?: characters.first()
+        return byIdMap[id] ?: characters.first()
     }
 }

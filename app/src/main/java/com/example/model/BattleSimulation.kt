@@ -19,11 +19,13 @@ class BattleSimulation(
     val onCollisionImpact: (isPlayerAttacker: Boolean, damage: Int, isCrit: Boolean, passiveLabel: String) -> Unit,
     val onWallBounce: (ball: CombatBall) -> Unit,
     val onKnockout: (isPlayerWinner: Boolean) -> Unit,
-    val onUltimateActivated: (isPlayer: Boolean, ultimateName: String) -> Unit = { _, _ -> }
+    val onUltimateActivated: (isPlayer: Boolean, ultimateName: String) -> Unit = { _, _ -> },
+    val onPassiveTriggered: (isPlayer: Boolean, passiveName: String) -> Unit = { _, _ -> },
+    val onRedirectUsed: (isPlayer: Boolean) -> Unit = {}
 ) {
-    val particles = ArrayList<Particle>(64)
-    val shockwaves = ArrayList<ShockwaveRing>(12)
-    val floatingTexts = ArrayList<FloatingCombatText>(12)
+    val particles = ArrayList<Particle>(72)
+    val shockwaves = ArrayList<ShockwaveRing>(14)
+    val floatingTexts = ArrayList<FloatingCombatText>(14)
     val fireHazards = ArrayList<FireHazardZone>(10)
 
     private var nextEntityId = 1L
@@ -38,7 +40,7 @@ class BattleSimulation(
     // Tactical mid-flight redirect cooldowns (seconds)
     var playerRedirectCooldown: Float = 0f
     var aiRedirectCooldown: Float = 2.4f
-    val maxRedirectCooldown: Float = 3.0f
+    val maxRedirectCooldown: Float get() = playerBall.effectiveRedirectCooldownSec
 
     // Wall impact flashes (0..1)
     var wallFlashLeft: Float = 0f
@@ -57,7 +59,7 @@ class BattleSimulation(
     val wallBottom: Float get() = arenaHeight - wallPadding - playerBall.radius
 
     val baseArenaSpeed: Float
-        get() = hypot(arenaWidth, arenaHeight) * 0.54f
+        get() = hypot(arenaWidth, arenaHeight) * 0.52f
 
     fun configureArenaBounds(widthPx: Float, heightPx: Float) {
         if (widthPx < 100f || heightPx < 100f) return
@@ -94,25 +96,24 @@ class BattleSimulation(
             mult *= ball.speedBoostMultiplier
         }
         if (ball.slowTimer > 0f) {
-            mult *= 0.85f
+            mult *= 0.80f
         }
         if (ball.jinwooSpeedStacks > 0) {
-            mult *= (1f + ball.jinwooSpeedStacks * 0.03f)
+            mult *= (1f + ball.jinwooSpeedStacks * 0.035f)
         }
         if (ball.isUltimateActive) {
-            when (ball.character.id) {
-                "kakarot_z" -> mult *= 1.30f
-                "chainsaw_devil" -> mult *= 1.28f
-                "kurosaki_hollow", "ryuko_scissor" -> mult *= 1.35f
-                "killua_godspeed", "okarun_turbo" -> mult *= 1.40f
-                "midoriya_ofa", "accelerator_vector" -> mult *= 1.36f
-                "frieza_emperor", "phosphophyllite_gem" -> mult *= 1.32f
-                "meruem_chimera", "vash_stampede", "hyakkimaru_dororo" -> mult *= 1.34f
-                "guts_berserk", "gabimaru_hollow" -> mult *= 1.30f
-                "raikiri_shinobi" -> mult *= (1f + min(6, ball.kamuiBounceStacks) * 0.08f)
+            when (ball.character.ultimateArchetype) {
+                UltimateArchetype.HYPER_AWAKEN -> mult *= 1.34f
+                UltimateArchetype.ULT_NULLIFY -> mult *= 1.28f
+                UltimateArchetype.SOUL_DEVOUR -> mult *= 1.26f
+                UltimateArchetype.HAZARD_STORM -> mult *= 1.22f
+                else -> mult *= 1.18f
+            }
+            if (ball.kamuiBounceStacks > 0) {
+                mult *= (1f + min(6, ball.kamuiBounceStacks) * 0.05f)
             }
         }
-        return baseArenaSpeed * mult.coerceIn(0.80f, 2.30f)
+        return baseArenaSpeed * mult.coerceIn(0.78f, 2.35f)
     }
 
     /**
@@ -127,8 +128,9 @@ class BattleSimulation(
         val aiDir = sanitizeLaunchAngle(computeAiInterceptDirection(difficulty))
 
         isClashStarted = true
-        playerRedirectCooldown = 1.2f
-        aiRedirectCooldown = difficulty.redirectCooldownSec * 0.75f
+        playerRedirectCooldown = 1.1f
+        aiRedirectCooldown = (difficulty.redirectCooldownSec - opponentBall.upgrades.redirectCooldownReduction())
+            .coerceAtLeast(1.65f) * 0.75f
 
         applyImpulseLaunch(playerBall, pDir, 1.0f)
         applyImpulseLaunch(opponentBall, aiDir, difficulty.speedFactor)
@@ -155,11 +157,17 @@ class BattleSimulation(
         val dir = sanitizeLaunchAngle(direction.normalized())
         if (dir.length() < 0.01f) return false
 
-        playerRedirectCooldown = maxRedirectCooldown
+        playerRedirectCooldown = playerBall.effectiveRedirectCooldownSec
         playerBall.speedBoostMultiplier = 1.26f
         playerBall.speedBoostTimer = 0.65f
         applyImpulseLaunch(playerBall, dir, 1.0f)
-        spawnFloatingText("REDIRECT!", playerBall.position.x, playerBall.position.y - playerBall.radius * 1.15f, Color(0xFF38BDF8))
+        spawnFloatingText(
+            "REDIRECT!",
+            playerBall.position.x,
+            playerBall.position.y - playerBall.radius * 1.15f,
+            Color(0xFF38BDF8)
+        )
+        onRedirectUsed(true)
         return true
     }
 
@@ -188,11 +196,13 @@ class BattleSimulation(
 
         aiRedirectCooldown = max(0f, aiRedirectCooldown - dt)
         if (aiRedirectCooldown <= 0f && !opponentBall.isStunned) {
-            aiRedirectCooldown = difficulty.redirectCooldownSec
+            aiRedirectCooldown = (difficulty.redirectCooldownSec - opponentBall.upgrades.redirectCooldownReduction())
+                .coerceAtLeast(1.75f)
             val dir = sanitizeLaunchAngle(computeAiInterceptDirection(difficulty))
             opponentBall.speedBoostMultiplier = 1.18f
             opponentBall.speedBoostTimer = 0.55f
             applyImpulseLaunch(opponentBall, dir, difficulty.speedFactor)
+            onRedirectUsed(false)
         }
     }
 
@@ -241,8 +251,8 @@ class BattleSimulation(
     }
 
     /**
-     * Triggers Ultimate for either Player or AI when gauge is 100% and cooldown is 0.
-     * Once Ultimate finishes, `ultimateCooldownRemaining` automatically begins!
+     * Triggers Ultimate Awakening for either Player or AI across all 224 characters
+     * via the 10 deterministic UltimateArchetypes.
      */
     fun triggerUltimate(ball: CombatBall): Boolean {
         if (!ball.canActivateUltimate) return false
@@ -250,87 +260,105 @@ class BattleSimulation(
         ball.isUltimateActive = true
         ball.ultimateTimeRemaining = ball.character.ultimateDurationSeconds
         ball.kamuiBounceStacks = 0
-        ball.weaponSpinBurst = 20f
+        ball.weaponSpinBurst = 22f
 
         val isPlayer = ball === playerBall
         val rival = if (isPlayer) opponentBall else playerBall
         val prefix = if (isPlayer) "" else "AI "
+        val pwrBonus = ball.upgrades.powerLevel
 
-        when (ball.character.id) {
-            "satoru_void" -> {
+        when (ball.character.ultimateArchetype) {
+            UltimateArchetype.TIME_STOP -> {
                 if (rival.velocity.length() > 1f) rival.resumeDirection = rival.velocity.normalized()
                 rival.velocity = Vector2.Zero
-                rival.stunTimeRemaining = 1.5f
-                spawnFloatingText("${prefix}UNLIMITED VOID!", rival.position.x, rival.position.y - rival.radius * 1.25f, Color(0xFF818CF8), isCrit = true)
-            }
-            "kujo_star", "dio_world" -> {
-                if (rival.velocity.length() > 1f) rival.resumeDirection = rival.velocity.normalized()
-                rival.velocity = Vector2.Zero
-                rival.stunTimeRemaining = 1.6f
-                val callout = if (ball.character.id == "dio_world") "${prefix}ZA WARUDO!" else "${prefix}TIME STOP!"
+                rival.stunTimeRemaining = 1.65f
+                val callout = if (ball.character.id == "dio_world") "${prefix}ZA WARUDO!" else "$prefix${ball.character.ultimateName.uppercase()}!"
                 spawnFloatingText(callout, rival.position.x, rival.position.y - rival.radius * 1.25f, Color(0xFFFACC15), isCrit = true)
             }
-            "caped_baldy" -> {
-                ball.isSeriousActive = true
-                spawnFloatingText("${prefix}SERIOUS PUNCH ARMED!", ball.position.x, ball.position.y - ball.radius * 1.25f, Color(0xFFFACC15), isCrit = true)
+
+            UltimateArchetype.DOMAIN_STUN -> {
+                if (rival.velocity.length() > 1f) rival.resumeDirection = rival.velocity.normalized()
+                rival.velocity = Vector2.Zero
+                rival.stunTimeRemaining = 1.50f
+                rival.slowTimer = 2.6f
+                spawnFireHazard(ball.id, rival.position.x, rival.position.y, rival.radius * 1.05f, 4.0f, ball.character.auraColor)
+                spawnFloatingText("$prefix${ball.character.ultimateName.uppercase()}!", rival.position.x, rival.position.y - rival.radius * 1.25f, Color(0xFF818CF8), isCrit = true)
             }
-            "yeager_titan", "makima_control", "blackbeard_tremor", "madara_uchiha", "ainz_overlord", "gilgamesh_babylon", "tetsuo_psychic", "aizen_kyoka" -> {
-                val burstDmg = when (ball.character.id) {
-                    "aizen_kyoka" -> 10f
-                    "yeager_titan", "blackbeard_tremor", "gilgamesh_babylon", "tetsuo_psychic" -> 12f
-                    else -> 13f
-                }
+
+            UltimateArchetype.SERIOUS_ONE_PUNCH -> {
+                ball.isSeriousActive = true
+                ball.speedBoostMultiplier = 1.28f
+                ball.speedBoostTimer = 2.5f
+                spawnFloatingText("$prefix${ball.character.ultimateName.uppercase()} ARMED!", ball.position.x, ball.position.y - ball.radius * 1.25f, Color(0xFFFACC15), isCrit = true)
+            }
+
+            UltimateArchetype.METEOR_NUKE -> {
+                val burstDmg = 28f + pwrBonus * 3f
                 val delta = rival.position - ball.position
                 val dist = delta.length().coerceAtLeast(1f)
                 rival.currentHp = max(0f, rival.currentHp - burstDmg)
-                rival.hitFlashTimer = 0.85f
+                rival.hitFlashTimer = 0.90f
                 val pushDir = sanitizeLaunchAngle(delta / dist)
                 rival.resumeDirection = pushDir
                 if (!rival.isStunned) {
-                    rival.velocity = pushDir * (computeTargetCruiseSpeed(rival) * 1.25f)
+                    rival.velocity = pushDir * (computeTargetCruiseSpeed(rival) * 1.28f)
                 }
-                if (ball.character.id == "madara_uchiha") {
-                    spawnFireHazard(ball.id, rival.position.x, rival.position.y, rival.radius, 4.0f)
-                }
+                spawnFireHazard(ball.id, rival.position.x, rival.position.y, rival.radius * 1.05f, 4.2f, ball.character.auraColor)
+                spawnShockwave(rival.position.x, rival.position.y, ball.character.auraColor, rival.radius * 3.4f)
                 spawnFloatingText("-${burstDmg.toInt()} ${ball.character.ultimateName.uppercase()}!", rival.position.x, rival.position.y - rival.radius, ball.character.auraColor, isCrit = true)
             }
-            "griffith_femto" -> {
-                rival.currentHp = max(0f, rival.currentHp - 11f)
-                rival.hitFlashTimer = 0.8f
+
+            UltimateArchetype.GRAVITY_CRUSH -> {
+                val crushDmg = 22f + pwrBonus * 2.5f
+                rival.currentHp = max(0f, rival.currentHp - crushDmg)
+                rival.hitFlashTimer = 0.85f
                 if (rival.velocity.length() > 1f) rival.resumeDirection = rival.velocity.normalized()
-                rival.stunTimeRemaining = 0.8f
-                spawnFloatingText("-11 ECLIPSE CRUSH!", rival.position.x, rival.position.y - rival.radius, Color(0xFF818CF8), isCrit = true)
+                rival.stunTimeRemaining = 0.85f
+                rival.slowTimer = 2.8f
+                spawnShockwave(rival.position.x, rival.position.y, ball.character.auraColor, rival.radius * 3.1f)
+                spawnFloatingText("-${crushDmg.toInt()} ${ball.character.ultimateName.uppercase()}!", rival.position.x, rival.position.y - rival.radius, ball.character.auraColor, isCrit = true)
             }
-            "elric_fullmetal", "phosphophyllite_gem", "caiman_dorohedoro" -> {
-                val healAmt = when (ball.character.id) {
-                    "caiman_dorohedoro" -> 14f
-                    "elric_fullmetal" -> 12f
-                    else -> 10f
-                }
+
+            UltimateArchetype.HEAL_REFORGE -> {
+                val healAmt = max(48f, ball.maxHp * 0.18f + pwrBonus * 4f)
                 ball.currentHp = min(ball.maxHp, ball.currentHp + healAmt)
+                ball.isShieldActive = true
+                ball.shieldVisualTimer = 3.6f
                 spawnFloatingText("+${healAmt.toInt()} HP ${ball.character.ultimateName.uppercase()}!", ball.position.x, ball.position.y - ball.radius * 1.25f, Color(0xFF4ADE80), isCrit = true)
             }
-            "rimuru_tempest" -> {
-                rival.ultimateGauge = max(0f, rival.ultimateGauge - 18f)
-                spawnFloatingText("${prefix}BEELZEBUTH DEVOUR!", ball.position.x, ball.position.y - ball.radius * 1.25f, Color(0xFF38BDF8), isCrit = true)
+
+            UltimateArchetype.SOUL_DEVOUR -> {
+                val drainHp = 22f + pwrBonus * 2.5f
+                rival.currentHp = max(0f, rival.currentHp - drainHp)
+                rival.hitFlashTimer = 0.8f
+                ball.currentHp = min(ball.maxHp, ball.currentHp + drainHp)
+                rival.ultimateGauge = max(0f, rival.ultimateGauge - 24f)
+                spawnFloatingText("±${drainHp.toInt()} ${ball.character.ultimateName.uppercase()}!", ball.position.x, ball.position.y - ball.radius * 1.25f, Color(0xFF38BDF8), isCrit = true)
             }
-            "shigaraki_decay", "en_dorohedoro" -> {
-                spawnFireHazard(ball.id, ball.position.x, ball.position.y, ball.radius * 1.15f, 4.4f)
-                spawnFireHazard(ball.id, rival.position.x, rival.position.y, rival.radius * 0.95f, 4.0f)
-                spawnFloatingText("${prefix}${ball.character.ultimateName.uppercase()}!", ball.position.x, ball.position.y - ball.radius * 1.25f, ball.character.auraColor, isCrit = true)
+
+            UltimateArchetype.HAZARD_STORM -> {
+                spawnFireHazard(ball.id, ball.position.x, ball.position.y, ball.radius * 1.15f, 4.6f, ball.character.auraColor)
+                spawnFireHazard(ball.id, rival.position.x, rival.position.y, ball.radius * 0.98f, 4.2f, ball.character.auraColor)
+                spawnFireHazard(ball.id, arenaWidth * 0.5f, arenaHeight * 0.5f, ball.radius * 1.10f, 4.4f, ball.character.auraColor)
+                spawnFloatingText("$prefix${ball.character.ultimateName.uppercase()}!", ball.position.x, ball.position.y - ball.radius * 1.25f, ball.character.auraColor, isCrit = true)
             }
-            "asta_grimoire" -> {
+
+            UltimateArchetype.ULT_NULLIFY -> {
                 if (rival.isUltimateActive) {
                     rival.isUltimateActive = false
                     rival.ultimateTimeRemaining = 0f
                     rival.isSeriousActive = false
-                    rival.ultimateCooldownRemaining = rival.character.ultimateCooldownSeconds * 0.75f
+                    rival.ultimateCooldownRemaining = rival.effectiveUltCooldownSec * 0.78f
                     spawnFloatingText("ULTIMATE NULLIFIED!", rival.position.x, rival.position.y - rival.radius * 1.3f, Color(0xFFEF4444), isCrit = true)
                 } else {
-                    spawnFloatingText("${prefix}BLACK DIVIDER!", ball.position.x, ball.position.y - ball.radius * 1.25f, Color(0xFFEF4444), isCrit = true)
+                    rival.ultimateGauge = max(0f, rival.ultimateGauge - 35f)
+                    spawnFloatingText("$prefix${ball.character.ultimateName.uppercase()}!", ball.position.x, ball.position.y - ball.radius * 1.25f, Color(0xFFEF4444), isCrit = true)
                 }
             }
-            else -> {
+
+            UltimateArchetype.HYPER_AWAKEN -> {
+                ball.speedBoostMultiplier = 1.25f
+                ball.speedBoostTimer = 1.4f
                 spawnFloatingText(
                     "$prefix${ball.character.ultimateName.uppercase()}!",
                     ball.position.x,
@@ -341,9 +369,9 @@ class BattleSimulation(
             }
         }
 
-        spawnShockwave(ball.position.x, ball.position.y, ball.character.auraColor, ball.radius * 3.8f)
+        spawnShockwave(ball.position.x, ball.position.y, ball.character.auraColor, ball.radius * 3.9f)
         spawnImpactBurst(ball.position.x, ball.position.y, ball.character.auraColor, engineSettings.renderMode.particleCountOnHit)
-        screenShakeAmount = 18f
+        screenShakeAmount = 20f
         onUltimateActivated(isPlayer, ball.character.ultimateName)
         checkKnockoutState()
         return true
@@ -433,7 +461,7 @@ class BattleSimulation(
             ball.resumeDirection = ball.velocity / currentSpeed
             val regulatedSpeed = when {
                 currentSpeed < targetSpeed -> targetSpeed
-                currentSpeed > targetSpeed * 1.45f -> targetSpeed * 1.45f
+                currentSpeed > targetSpeed * 1.48f -> targetSpeed * 1.48f
                 else -> currentSpeed + (targetSpeed - currentSpeed) * min(1f, subDt * 4.5f)
             }
             ball.velocity = ball.resumeDirection * regulatedSpeed
@@ -444,7 +472,7 @@ class BattleSimulation(
 
     /**
      * Symmetric Ultimate state machine for BOTH Player and AI:
-     * 1. Active Awakening -> drains `ultimateTimeRemaining`, then enters `ultimateCooldownRemaining`.
+     * 1. Active Awakening -> drains `ultimateTimeRemaining`, then enters `effectiveUltCooldownSec`.
      * 2. Cooldown -> drains `ultimateCooldownRemaining` (gauge locked at 0%).
      * 3. Charging -> builds `ultimateGauge` from 0% to 100%.
      */
@@ -460,9 +488,11 @@ class BattleSimulation(
             ball.ultimateTimeRemaining -= dt
 
             val trailCd = if (isPlayer) playerTrailCooldown else aiTrailCooldown
-            if ((ball.character.id == "kamado_sun" || ball.character.id == "shigaraki_decay") && trailCd <= 0f && !ball.isStunned) {
-                if (isPlayer) playerTrailCooldown = 0.42f else aiTrailCooldown = 0.42f
-                spawnFireHazard(ball.id, ball.position.x, ball.position.y, ball.radius * 0.82f, 3.4f)
+            val leavesTrail = ball.character.ultimateArchetype == UltimateArchetype.HAZARD_STORM ||
+                ball.character.passiveArchetype == PassiveArchetype.SCORCH_BURN
+            if (leavesTrail && trailCd <= 0f && !ball.isStunned) {
+                if (isPlayer) playerTrailCooldown = 0.48f else aiTrailCooldown = 0.48f
+                spawnFireHazard(ball.id, ball.position.x, ball.position.y, ball.radius * 0.80f, 3.2f, ball.character.auraColor)
             }
 
             if (ball.ultimateTimeRemaining <= 0f) {
@@ -471,8 +501,8 @@ class BattleSimulation(
                 ball.isSeriousActive = false
                 ball.kamuiBounceStacks = 0
                 ball.ultimateGauge = 0f
-                // Enter mandatory post-Ultimate cooldown for BOTH Player and AI!
-                ball.ultimateCooldownRemaining = ball.character.ultimateCooldownSeconds
+                // Enter mandatory post-Ultimate cooldown (reduced by Chrono Drive CD upgrades!)
+                ball.ultimateCooldownRemaining = ball.effectiveUltCooldownSec
             }
             return
         }
@@ -484,12 +514,16 @@ class BattleSimulation(
         }
 
         // Steady combat spirit charge while actively ricocheting
-        ball.addUltimate(4.0f * dt)
+        ball.addUltimate(4.2f * dt)
     }
 
     private fun updateStatusEffects(ball: CombatBall, dt: Float) {
         if (ball.slowTimer > 0f) {
             ball.slowTimer = max(0f, ball.slowTimer - dt)
+        }
+        if (ball.shieldVisualTimer > 0f) {
+            ball.shieldVisualTimer = max(0f, ball.shieldVisualTimer - dt)
+            if (ball.shieldVisualTimer <= 0f) ball.isShieldActive = false
         }
 
         if (ball.stunTimeRemaining > 0f) {
@@ -507,9 +541,20 @@ class BattleSimulation(
             if (ball.bleedTimer >= 0.5f) {
                 ball.bleedTimer -= 0.5f
                 ball.bleedTicksRemaining--
-                ball.currentHp = max(0f, ball.currentHp - 2f)
+                ball.currentHp = max(0f, ball.currentHp - 3f)
+                ball.hitFlashTimer = 0.40f
+                spawnFloatingText("-3 BLEED", ball.position.x, ball.position.y - ball.radius, Color(0xFFEF4444))
+            }
+        }
+
+        if (ball.burnTicksRemaining > 0) {
+            ball.burnTimer += dt
+            if (ball.burnTimer >= 0.55f) {
+                ball.burnTimer -= 0.55f
+                ball.burnTicksRemaining--
+                ball.currentHp = max(0f, ball.currentHp - 4f)
                 ball.hitFlashTimer = 0.45f
-                spawnFloatingText("-2 BLEED", ball.position.x, ball.position.y - ball.radius, Color(0xFFEF4444))
+                spawnFloatingText("-4 BURN", ball.position.x, ball.position.y - ball.radius * 0.8f, Color(0xFFF97316))
             }
         }
     }
@@ -534,7 +579,7 @@ class BattleSimulation(
         val dy = ball.position.y - hazard.y
         val maxDist = ball.radius + hazard.radius * 0.78f
         if (dx * dx + dy * dy < maxDist * maxDist) {
-            ball.currentHp = max(0f, ball.currentHp - 5.5f * dt)
+            ball.currentHp = max(0f, ball.currentHp - 6.5f * dt)
         }
     }
 
@@ -572,40 +617,42 @@ class BattleSimulation(
         }
 
         if (bouncedX || bouncedY) {
+            val isPlayer = ball === playerBall
             ball.wallBounceCombo++
             ball.totalWallBounces++
-            ball.addUltimate(3.8f)
+            ball.addUltimate(3.6f)
 
-            when (ball.character.id) {
-                "mugiwara_joy" -> {
-                    ball.speedBoostMultiplier = 1.18f
-                    ball.speedBoostTimer = 0.75f
+            when (ball.character.passiveArchetype) {
+                PassiveArchetype.ELASTIC_MOMENTUM -> {
+                    ball.speedBoostMultiplier = 1.22f
+                    ball.speedBoostTimer = 0.85f
                     if (ball.isUltimateActive) {
-                        spawnShockwave(ball.position.x, ball.position.y, Color.White, ball.radius * 2.1f)
+                        spawnShockwave(ball.position.x, ball.position.y, ball.character.auraColor, ball.radius * 2.0f)
+                    }
+                    if (ball.wallBounceCombo == 2) {
+                        onPassiveTriggered(isPlayer, ball.character.passiveName)
                     }
                 }
-                "okarun_turbo" -> {
-                    ball.speedBoostMultiplier = 1.20f
-                    ball.speedBoostTimer = 0.80f
-                }
-                "rimuru_tempest" -> {
-                    if (ball.totalWallBounces % 3 == 0) {
-                        ball.currentHp = min(ball.maxHp, ball.currentHp + 2f)
+                PassiveArchetype.REGEN_IMMORTAL -> {
+                    if (ball.totalWallBounces % 3 == 0 && ball.currentHp < ball.maxHp) {
+                        val heal = 5f + ball.upgrades.healthLevel * 0.5f
+                        ball.currentHp = min(ball.maxHp, ball.currentHp + heal)
+                        spawnFloatingText("+${heal.toInt()} REGEN", ball.position.x, ball.position.y - ball.radius, Color(0xFF4ADE80))
+                        onPassiveTriggered(isPlayer, ball.character.passiveName)
                     }
                 }
+                else -> Unit
             }
 
             if (ball.isUltimateActive) {
-                when (ball.character.id) {
-                    "raikiri_shinobi" -> ball.kamuiBounceStacks = min(6, ball.kamuiBounceStacks + 1)
-                    "dragneel_ignis", "gabimaru_hollow", "en_dorohedoro" -> {
-                        spawnFireHazard(ball.id, ball.position.x, ball.position.y, ball.radius * 0.85f, 3.2f)
-                    }
+                ball.kamuiBounceStacks = min(6, ball.kamuiBounceStacks + 1)
+                if (ball.character.passiveArchetype == PassiveArchetype.SCORCH_BURN) {
+                    spawnFireHazard(ball.id, ball.position.x, ball.position.y, ball.radius * 0.82f, 3.0f, ball.character.auraColor)
                 }
             }
 
             val speed = max(ball.velocity.length(), computeTargetCruiseSpeed(ball))
-            val rival = if (ball === playerBall) opponentBall else playerBall
+            val rival = if (isPlayer) opponentBall else playerBall
             val toRival = (rival.position - ball.position).normalized()
             val blendedDir = sanitizeLaunchAngle((ball.velocity.normalized() * 0.88f + toRival * 0.12f).normalized())
 
@@ -640,7 +687,8 @@ class BattleSimulation(
     private fun checkBallToBallCollision() {
         val delta = opponentBall.position - playerBall.position
         val dist = delta.length()
-        val hasWideReach = playerBall.character.id in WIDE_REACH_IDS || opponentBall.character.id in WIDE_REACH_IDS
+        val hasWideReach = playerBall.character.weaponType in WIDE_REACH_WEAPONS ||
+            opponentBall.character.weaponType in WIDE_REACH_WEAPONS
         val reachBonus = if (hasWideReach) 6f else 0f
         val minDist = playerBall.radius + opponentBall.radius + reachBonus
 
@@ -668,36 +716,30 @@ class BattleSimulation(
         val attacker = if (isPlayerAttacker) playerBall else opponentBall
         val defender = if (isPlayerAttacker) opponentBall else playerBall
 
-        val m1 = playerBall.character.massRating
-        val m2 = opponentBall.character.massRating
+        val m1 = playerBall.character.massRating *
+            (if (playerBall.character.passiveArchetype == PassiveArchetype.TITAN_JUGGERNAUT) 1.55f else 1f)
+        val m2 = opponentBall.character.massRating *
+            (if (opponentBall.character.passiveArchetype == PassiveArchetype.TITAN_JUGGERNAUT) 1.55f else 1f)
 
         val effectiveRel = min(velAlongNormal, -baseArenaSpeed * 0.45f)
         var impulseMag = -2.0f * effectiveRel / ((1f / m1) + (1f / m2))
-        if (attacker.character.id == "kakarot_z" || attacker.character.id == "tetsuo_psychic") {
-            impulseMag *= 1.38f
+        if (attacker.character.passiveArchetype == PassiveArchetype.SHOCKWAVE_KNOCKBACK) {
+            impulseMag *= 1.36f
         }
         val impulseVec = normal * impulseMag
 
         if (!playerBall.isStunned) {
-            val rawV1 = if (playerBall.character.id == "yeager_titan" && !isPlayerAttacker) {
-                playerBall.velocity - (impulseVec / (m1 * 1.8f))
-            } else {
-                playerBall.velocity - (impulseVec / m1)
-            }
+            val rawV1 = playerBall.velocity - (impulseVec / m1)
             val dir1 = sanitizeLaunchAngle(if (rawV1.length() > 5f) rawV1.normalized() else (normal * -1f))
-            val boost1 = if (!isPlayerAttacker && (attacker.character.id == "kakarot_z" || attacker.character.id == "tetsuo_psychic")) 1.30f else 1.08f
+            val boost1 = if (!isPlayerAttacker && attacker.character.passiveArchetype == PassiveArchetype.SHOCKWAVE_KNOCKBACK) 1.32f else 1.08f
             playerBall.resumeDirection = dir1
             playerBall.velocity = dir1 * (computeTargetCruiseSpeed(playerBall) * boost1)
         }
 
         if (!opponentBall.isStunned) {
-            val rawV2 = if (opponentBall.character.id == "yeager_titan" && isPlayerAttacker) {
-                opponentBall.velocity + (impulseVec / (m2 * 1.8f))
-            } else {
-                opponentBall.velocity + (impulseVec / m2)
-            }
+            val rawV2 = opponentBall.velocity + (impulseVec / m2)
             val dir2 = sanitizeLaunchAngle(if (rawV2.length() > 5f) rawV2.normalized() else normal)
-            val boost2 = if (isPlayerAttacker && (attacker.character.id == "kakarot_z" || attacker.character.id == "tetsuo_psychic")) 1.30f else 1.08f
+            val boost2 = if (isPlayerAttacker && attacker.character.passiveArchetype == PassiveArchetype.SHOCKWAVE_KNOCKBACK) 1.32f else 1.08f
             opponentBall.resumeDirection = dir2
             opponentBall.velocity = dir2 * (computeTargetCruiseSpeed(opponentBall) * boost2)
         }
@@ -713,12 +755,16 @@ class BattleSimulation(
         opponentBall.weaponSpinBurst = 16f
 
         if (collisionCooldown > 0f) return
-        collisionCooldown = 0.16f
+        collisionCooldown = 0.22f
 
         resolveCollisionCombat(attacker, defender, isPlayerAttacker, pSpeed, oSpeed)
         attacker.wallBounceCombo = 0
     }
 
+    /**
+     * Executes every single character's PassiveArchetype (all 18 archetypes across 224 fighters)
+     * plus defender passives, upgrade scaling, and SFX/VFX feedback!
+     */
     private fun resolveCollisionCombat(
         attacker: CombatBall,
         defender: CombatBall,
@@ -726,164 +772,224 @@ class BattleSimulation(
         pSpeed: Float,
         oSpeed: Float
     ) {
-        val bankBonus = when (attacker.character.id) {
-            "vash_stampede" -> min(16, attacker.wallBounceCombo * 4)
-            "midoriya_ofa" -> min(12, attacker.wallBounceCombo * 3)
-            else -> min(10, attacker.wallBounceCombo * 2)
-        }
-        var damage = attacker.character.baseDamage.toFloat() + bankBonus + attacker.meruemDamageStacks
-        var isCrit = bankBonus >= 4
+        attacker.hitCounter++
+        val bankPerBounce = if (attacker.character.passiveArchetype == PassiveArchetype.ELASTIC_MOMENTUM) 4 else 2
+        val maxBank = if (attacker.character.passiveArchetype == PassiveArchetype.ELASTIC_MOMENTUM) 20 else 12
+        val bankBonus = min(maxBank, attacker.wallBounceCombo * bankPerBounce)
 
-        if (attacker.isUltimateActive) {
-            damage *= attacker.character.ultimateDamageMultiplier
+        var damage = attacker.effectiveBaseDamage.toFloat() +
+            bankBonus +
+            (attacker.meruemDamageStacks * 2f) +
+            (attacker.jinwooSpeedStacks * 1.5f)
+        var isCrit = bankBonus >= 4
+        var passiveFired = false
+        var activePassiveTag = attacker.character.passiveName
+
+        // Armed Serious One-Punch Ultimate Override
+        if (attacker.isSeriousActive) {
+            damage = 54f + (attacker.upgrades.powerLevel * 5f) + bankBonus
+            isCrit = true
+            attacker.isSeriousActive = false
+            screenShakeAmount = 28f
+            spawnFloatingText(
+                "${attacker.character.ultimateName.uppercase()}!",
+                defender.position.x,
+                defender.position.y - defender.radius * 1.45f,
+                Color(0xFFFACC15),
+                isCrit = true
+            )
+        } else if (attacker.isUltimateActive) {
+            damage *= attacker.effectiveUltMultiplier
             isCrit = true
         }
 
-        // Attacker Passives (all 48 fighters)
-        when (attacker.character.id) {
-            "kamado_sun", "shigaraki_decay" -> {
-                defender.bleedTicksRemaining = 4
-                defender.bleedTimer = 0f
+        // --- ATTACKER PASSIVES (All 18 PassiveArchetypes — 100% functional across all 224 characters!) ---
+        when (attacker.character.passiveArchetype) {
+            PassiveArchetype.SHOCKWAVE_KNOCKBACK -> {
+                damage += 4f
+                spawnShockwave(defender.position.x, defender.position.y, attacker.character.auraColor, defender.radius * 2.8f)
+                passiveFired = true
             }
-            "roronoa_ashura", "ryuko_scissor" -> {
-                defender.bleedTicksRemaining = max(defender.bleedTicksRemaining, 3)
-                defender.bleedTimer = 0f
-                if (attacker.character.id == "ryuko_scissor") {
-                    attacker.speedBoostMultiplier = 1.15f
-                    attacker.speedBoostTimer = 0.65f
-                }
+
+            PassiveArchetype.SCORCH_BURN -> {
+                defender.burnTicksRemaining = max(defender.burnTicksRemaining, 3)
+                defender.burnTimer = 0f
+                spawnFireHazard(attacker.id, defender.position.x, defender.position.y, defender.radius * 0.88f, 3.6f, attacker.character.auraColor)
+                passiveFired = true
             }
-            "hyakkimaru_dororo" -> {
-                defender.bleedTicksRemaining = 4
+
+            PassiveArchetype.CRIMSON_BLEED -> {
+                defender.bleedTicksRemaining = max(defender.bleedTicksRemaining, 4)
                 defender.bleedTimer = 0f
-                if (defender.character.alignment == CharacterAlignment.ANTAGONIST) {
-                    damage += 3f
-                }
-                if (attacker.isUltimateActive) {
-                    attacker.currentHp = min(attacker.maxHp, attacker.currentHp + 4f)
-                }
+                attacker.speedBoostMultiplier = 1.15f
+                attacker.speedBoostTimer = 0.65f
+                passiveFired = true
             }
-            "raikiri_shinobi" -> {
-                if (!defender.isStunned) {
+
+            PassiveArchetype.LIGHTNING_PARALYZE -> {
+                damage += 3f
+                if (attacker.hitCounter % 2 == 0 && !defender.isStunned) {
                     if (defender.velocity.length() > 1f) defender.resumeDirection = defender.velocity.normalized()
-                    defender.stunTimeRemaining = 0.22f
+                    defender.stunTimeRemaining = 0.26f
+                    spawnFloatingText("PARALYZED!", defender.position.x, defender.position.y - defender.radius * 1.25f, Color(0xFF38BDF8))
+                    passiveFired = true
                 }
             }
-            "chainsaw_devil" -> {
-                val heal = if (attacker.isUltimateActive) 6f else 3f
-                attacker.currentHp = min(attacker.maxHp, attacker.currentHp + heal)
-                spawnFloatingText("+${heal.toInt()} HP", attacker.position.x, attacker.position.y - attacker.radius, Color(0xFF4ADE80))
-            }
-            "muzan_progenitor" -> {
-                val heal = if (attacker.isUltimateActive) 6f else 3f
-                attacker.currentHp = min(attacker.maxHp, attacker.currentHp + heal)
-                defender.bleedTicksRemaining = max(defender.bleedTicksRemaining, 3)
-                defender.bleedTimer = 0f
-            }
-            "dio_world" -> {
-                attacker.currentHp = min(attacker.maxHp, attacker.currentHp + 3f)
-                defender.ultimateGauge = max(0f, defender.ultimateGauge - 8f)
-            }
-            "dragneel_ignis", "gabimaru_hollow" -> {
-                spawnFireHazard(attacker.id, defender.position.x, defender.position.y, defender.radius * 0.90f, 3.6f)
-            }
-            "asta_grimoire" -> {
-                defender.ultimateGauge = max(0f, defender.ultimateGauge - 12f)
-            }
-            "blackbeard_tremor" -> {
-                defender.ultimateGauge = max(0f, defender.ultimateGauge - 10f)
-            }
-            "kurosaki_hollow", "frieza_emperor", "kafka_kaiju" -> {
+
+            PassiveArchetype.ELASTIC_MOMENTUM -> {
                 val mySpd = if (isPlayerAttacker) pSpeed else oSpeed
                 val theirSpd = if (isPlayerAttacker) oSpeed else pSpeed
-                if (mySpd >= theirSpd) damage += 4f
-            }
-            "killua_godspeed", "gilgamesh_babylon" -> {
-                damage += 3f
-            }
-            "kujo_star" -> {
-                damage += 4f
-            }
-            "guts_berserk" -> {
-                val missingRatio = ((100f - attacker.currentHp) / 100f).coerceIn(0f, 1f)
-                damage *= (1f + missingRatio * 0.35f)
-            }
-            "meruem_chimera" -> {
-                attacker.meruemDamageStacks = min(8, attacker.meruemDamageStacks + 1)
-            }
-            "ainz_overlord", "en_dorohedoro" -> {
-                defender.slowTimer = 1.55f
-            }
-            "caped_baldy" -> {
-                if (attacker.isSeriousActive) {
-                    damage = 38f + bankBonus
-                    isCrit = true
-                    attacker.isSeriousActive = false
-                    screenShakeAmount = 28f
-                    spawnFloatingText("SERIOUS PUNCH!", defender.position.x, defender.position.y - defender.radius * 1.4f, Color(0xFFFACC15), isCrit = true)
+                if (mySpd >= theirSpd) {
+                    damage += 4f
+                    passiveFired = true
                 }
             }
-            "alucard_hellsing" -> {
-                val siphon = if (attacker.isUltimateActive) 6f else 3f
+
+            PassiveArchetype.VAMPIRIC_SIPHON -> {
+                val siphon = (if (attacker.isUltimateActive) 9f else 5f) + attacker.upgrades.powerLevel * 0.5f
                 attacker.currentHp = min(attacker.maxHp, attacker.currentHp + siphon)
+                spawnFloatingText("+${siphon.toInt()} DRAIN", attacker.position.x, attacker.position.y - attacker.radius, Color(0xFF4ADE80))
+                passiveFired = true
             }
-            "sukuna_shrine" -> {
-                if (defender.currentHp < 50f) {
-                    damage *= 1.25f
+
+            PassiveArchetype.ANTI_MAGIC_DRAIN -> {
+                defender.ultimateGauge = max(0f, defender.ultimateGauge - 14f)
+                if (defender.character.element == ElementTag.MAGIC || defender.isUltimateActive) {
+                    damage += 5f
+                }
+                spawnFloatingText("-14% MANA", defender.position.x, defender.position.y - defender.radius * 1.2f, Color(0xFFEF4444))
+                passiveFired = true
+            }
+
+            PassiveArchetype.BERSERKER_RAGE -> {
+                val missingRatio = ((attacker.maxHp - attacker.currentHp) / attacker.maxHp.coerceAtLeast(1f)).coerceIn(0f, 1f)
+                val rageBonus = 1f + missingRatio * 0.48f
+                damage *= rageBonus
+                if (missingRatio >= 0.25f) {
                     isCrit = true
-                }
-                if (attacker.isUltimateActive) {
-                    defender.bleedTicksRemaining = 4
-                    defender.bleedTimer = 0f
+                    passiveFired = true
                 }
             }
-            "jinwoo_monarch" -> {
+
+            PassiveArchetype.SHADOW_MONARCH_STACK -> {
                 attacker.jinwooSpeedStacks = min(8, attacker.jinwooSpeedStacks + 1)
                 if (attacker.isUltimateActive) {
-                    attacker.currentHp = min(attacker.maxHp, attacker.currentHp + 4f)
+                    attacker.currentHp = min(attacker.maxHp, attacker.currentHp + 5f)
+                }
+                passiveFired = true
+            }
+
+            PassiveArchetype.ADAPTIVE_EVOLUTION -> {
+                attacker.meruemDamageStacks = min(8, attacker.meruemDamageStacks + 1)
+                if (attacker.ultimateCooldownRemaining > 0f) {
+                    attacker.ultimateCooldownRemaining = max(0f, attacker.ultimateCooldownRemaining - 0.35f)
+                }
+                passiveFired = true
+            }
+
+            PassiveArchetype.FROST_GRAVITY_SLOW -> {
+                if (defender.slowTimer > 0f) {
+                    damage += 4f
+                }
+                defender.slowTimer = 1.75f
+                passiveFired = true
+            }
+
+            PassiveArchetype.BLACK_FLASH_CRIT -> {
+                if (attacker.hitCounter % 3 == 0) {
+                    damage *= 1.45f
+                    isCrit = true
+                    attacker.addUltimate(8f)
+                    spawnShockwave(defender.position.x, defender.position.y, Color(0xFFE11D48), defender.radius * 3.2f)
+                    spawnFloatingText("BLACK FLASH!", defender.position.x, defender.position.y - defender.radius * 1.3f, Color(0xFFE11D48), isCrit = true)
+                    passiveFired = true
+                } else {
+                    damage += 2f
+                }
+            }
+
+            PassiveArchetype.EXECUTE_SHRINE -> {
+                if (defender.currentHp < defender.maxHp * 0.50f) {
+                    damage *= 1.32f
+                    isCrit = true
+                    defender.bleedTicksRemaining = max(defender.bleedTicksRemaining, 3)
+                    defender.bleedTimer = 0f
+                    passiveFired = true
+                }
+            }
+
+            PassiveArchetype.ARCANE_OVERCHARGE -> {
+                if (attacker.ultimateGauge >= 50f || attacker.isUltimateActive) {
+                    damage += 6f
+                    passiveFired = true
+                }
+            }
+
+            PassiveArchetype.TITAN_JUGGERNAUT -> {
+                damage += 5f
+                passiveFired = true
+            }
+
+            PassiveArchetype.INFINITY_BARRIER -> {
+                attacker.isShieldActive = true
+                attacker.shieldVisualTimer = 0.85f
+                damage += 2f
+            }
+
+            PassiveArchetype.VECTOR_REFLECT -> {
+                damage += 3f
+            }
+
+            PassiveArchetype.REGEN_IMMORTAL -> {
+                if (attacker.currentHp < attacker.maxHp) {
+                    attacker.currentHp = min(attacker.maxHp, attacker.currentHp + 3f)
+                    passiveFired = true
                 }
             }
         }
 
-        // Defender Passives (unless bypassed by piercing Ultimates)
-        val ignoresDefense = attacker.character.id == "shigaraki_decay" ||
-            (attacker.isUltimateActive && attacker.character.id in DEFENSE_PIERCING_ULT_IDS)
+        // --- DEFENDER PASSIVES (unless attacker is firing an Anti-Magic / Domain / Nullify piercing Ultimate) ---
+        val ignoresDefense = attacker.isUltimateActive && (
+            attacker.character.ultimateArchetype == UltimateArchetype.ULT_NULLIFY ||
+                attacker.character.ultimateArchetype == UltimateArchetype.DOMAIN_STUN
+            )
 
         if (!ignoresDefense) {
-            when (defender.character.id) {
-                "satoru_void" -> {
-                    damage *= 0.80f
+            when (defender.character.passiveArchetype) {
+                PassiveArchetype.INFINITY_BARRIER -> {
+                    damage *= 0.78f
                     defender.isShieldActive = true
+                    defender.shieldVisualTimer = 0.90f
+                    defender.addUltimate(5f)
+                    onPassiveTriggered(!isPlayerAttacker, defender.character.passiveName)
                 }
-                "aizen_kyoka", "madara_uchiha", "griffith_femto" -> {
-                    damage *= 0.82f
+
+                PassiveArchetype.VECTOR_REFLECT -> {
+                    val reflected = max(2, (damage * 0.28f).toInt())
+                    damage *= 0.86f
+                    attacker.currentHp = max(0f, attacker.currentHp - reflected)
+                    attacker.hitFlashTimer = 0.55f
+                    defender.isShieldActive = true
+                    defender.shieldVisualTimer = 0.65f
+                    spawnFloatingText("-$reflected REFLECT", attacker.position.x, attacker.position.y - attacker.radius, Color(0xFF38BDF8))
+                    onPassiveTriggered(!isPlayerAttacker, defender.character.passiveName)
                 }
-                "bondrewd_dawn" -> {
-                    damage *= 0.80f
-                    defender.addUltimate(6f)
+
+                PassiveArchetype.TITAN_JUGGERNAUT -> {
+                    damage *= 0.86f
                 }
-                "caiman_dorohedoro" -> {
-                    if (attacker.character.classType == CharacterClass.CONTROL_MAGIC || attacker.character.element == ElementTag.MAGIC) {
-                        damage *= 0.70f
+
+                PassiveArchetype.REGEN_IMMORTAL -> {
+                    if (defender.currentHp < defender.maxHp * 0.60f) {
+                        defender.currentHp = min(defender.maxHp, defender.currentHp + 4f)
                     }
                 }
-                "elric_fullmetal", "makima_control" -> {
-                    val reflected = max(1, (damage * 0.25f).toInt())
-                    attacker.currentHp = max(0f, attacker.currentHp - reflected)
-                    attacker.hitFlashTimer = 0.5f
-                }
-                "accelerator_vector" -> {
-                    val reflected = max(1, (damage * 0.28f).toInt())
-                    attacker.currentHp = max(0f, attacker.currentHp - reflected)
-                    attacker.hitFlashTimer = 0.5f
-                }
-                "phosphophyllite_gem" -> {
-                    val reflected = max(1, (damage * 0.15f).toInt())
-                    attacker.currentHp = max(0f, attacker.currentHp - reflected)
-                }
+
+                else -> Unit
             }
-            if (defender.character.id == "killua_godspeed" && defender.isUltimateActive) {
-                damage *= 0.50f
+
+            if (defender.isShieldActive && defender.character.ultimateArchetype == UltimateArchetype.HEAL_REFORGE) {
+                damage *= 0.78f
             }
         }
 
@@ -891,13 +997,16 @@ class BattleSimulation(
         defender.currentHp = max(0f, defender.currentHp - finalDmg)
         defender.hitFlashTimer = 0.9f
 
-        // Charge Ultimate meters (only charges when not active and not on cooldown)
-        attacker.addUltimate(18f)
-        val defGain = if (defender.character.id == "kageyama_esper") 21f else 14f
-        defender.addUltimate(defGain)
+        if (passiveFired) {
+            onPassiveTriggered(isPlayerAttacker, activePassiveTag)
+        }
+
+        // Charge Ultimate meters symmetrically (only charges when not active and not on cooldown)
+        attacker.addUltimate(15f)
+        defender.addUltimate(12f)
 
         val contact = (playerBall.position + opponentBall.position) * 0.5f
-        spawnShockwave(contact.x, contact.y, attacker.character.auraColor, attacker.radius * (if (isCrit) 3.1f else 2.2f))
+        spawnShockwave(contact.x, contact.y, attacker.character.auraColor, attacker.radius * (if (isCrit) 3.2f else 2.2f))
         spawnImpactBurst(contact.x, contact.y, attacker.character.auraColor, engineSettings.renderMode.particleCountOnHit)
         screenShakeAmount = max(screenShakeAmount, if (isCrit) 18f else 10f)
 
@@ -914,7 +1023,7 @@ class BattleSimulation(
             isCrit = isCrit
         )
 
-        onCollisionImpact(isPlayerAttacker, finalDmg, isCrit, attacker.character.passiveName)
+        onCollisionImpact(isPlayerAttacker, finalDmg, isCrit, activePassiveTag)
     }
 
     private fun updateProceduralVisuals(ball: CombatBall, dt: Float) {
@@ -937,7 +1046,7 @@ class BattleSimulation(
         }
 
         if (speed > 80f && engineSettings.renderMode != RenderMode.PIXELIZED) {
-            val maxTrail = if (engineSettings.renderMode == RenderMode.REALISTIC) 6 else 4
+            val maxTrail = if (engineSettings.renderMode == RenderMode.REALISTIC) 7 else 5
             ball.trailPositions.addFirst(ball.position)
             while (ball.trailPositions.size > maxTrail) {
                 ball.trailPositions.removeLast()
@@ -947,7 +1056,14 @@ class BattleSimulation(
         }
     }
 
-    private fun spawnFireHazard(ownerId: String, x: Float, y: Float, radius: Float, duration: Float) {
+    private fun spawnFireHazard(
+        ownerId: String,
+        x: Float,
+        y: Float,
+        radius: Float,
+        duration: Float,
+        color: Color = Color(0xFFF97316)
+    ) {
         if (fireHazards.size >= 8) {
             fireHazards.removeAt(0)
         }
@@ -959,13 +1075,14 @@ class BattleSimulation(
                 y = y,
                 radius = radius,
                 life = duration,
-                maxLife = duration
+                maxLife = duration,
+                color = color
             )
         )
     }
 
     private fun spawnShockwave(x: Float, y: Float, color: Color, maxRadius: Float) {
-        if (shockwaves.size >= 10) {
+        if (shockwaves.size >= 12) {
             shockwaves.removeAt(0)
         }
         shockwaves.add(
@@ -975,8 +1092,8 @@ class BattleSimulation(
                 y = y,
                 color = color,
                 maxRadius = maxRadius,
-                life = 0.30f,
-                maxLife = 0.30f
+                life = 0.32f,
+                maxLife = 0.32f
             )
         )
     }
@@ -984,7 +1101,7 @@ class BattleSimulation(
     private fun spawnImpactBurst(x: Float, y: Float, color: Color, count: Int) {
         val speedScale = max(1f, min(arenaWidth, arenaHeight) / 440f)
         for (i in 0 until count) {
-            if (particles.size >= 64) {
+            if (particles.size >= 72) {
                 particles.removeAt(0)
             }
             val angle = Random.nextFloat() * 2f * Math.PI.toFloat()
@@ -1007,7 +1124,7 @@ class BattleSimulation(
     }
 
     fun spawnFloatingText(text: String, x: Float, y: Float, color: Color, isCrit: Boolean = false) {
-        if (floatingTexts.size >= 10) {
+        if (floatingTexts.size >= 12) {
             floatingTexts.removeAt(0)
         }
         val clampedX = x.coerceIn(arenaWidth * 0.16f, arenaWidth * 0.84f)
@@ -1019,8 +1136,8 @@ class BattleSimulation(
                 x = clampedX,
                 y = clampedY,
                 color = color,
-                life = 0.90f,
-                maxLife = 0.90f,
+                life = 0.92f,
+                maxLife = 0.92f,
                 isCrit = isCrit
             )
         )
@@ -1064,7 +1181,12 @@ class BattleSimulation(
     }
 
     companion object {
-        private val WIDE_REACH_IDS = setOf("roronoa_ashura", "gilgamesh_babylon", "phosphophyllite_gem")
-        private val DEFENSE_PIERCING_ULT_IDS = setOf("frieren_zoltraak", "simon_spiral", "bondrewd_dawn")
+        private val WIDE_REACH_WEAPONS = setOf(
+            WeaponVisualType.TRIPLE_KATANA,
+            WeaponVisualType.CRESCENT_SCYTHE,
+            WeaponVisualType.ROYAL_GATES,
+            WeaponVisualType.ALCHEMY_SPEAR,
+            WeaponVisualType.EXCALIBUR_BLADE
+        )
     }
 }

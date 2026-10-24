@@ -22,6 +22,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.VolumeOff
+import androidx.compose.material.icons.automirrored.outlined.VolumeUp
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.PlayArrow
@@ -82,6 +84,7 @@ fun BattleArenaScreen(
     onPlayerLaunch: (Vector2, Float) -> Unit,
     onQuickLaunchOpening: () -> Unit,
     onTriggerUltimate: () -> Unit,
+    onToggleSfx: () -> Unit,
     onSurrender: () -> Unit,
     onSaveEngineSettings: (EngineSettings) -> Unit
 ) {
@@ -99,12 +102,14 @@ fun BattleArenaScreen(
             .testTag("battle_arena_screen"),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        // 1. Symmetric Top Fighter HUD: HP + Ultimate Progress & Cooldown Bars for BOTH Player and AI
+        // 1. Symmetric Top Fighter HUD: Scaled MaxHP + Ultimate Progress & Cooldown Bars for BOTH Player and AI
         ArenaTopHud(
             playerName = simulation.playerBall.character.name,
             opponentName = simulation.opponentBall.character.name,
             hudState = hudState,
+            sfxEnabled = engineSettings.sfxEnabled,
             palette = palette,
+            onToggleSfx = onToggleSfx,
             onOpenSettings = { showSettings = true },
             onSurrender = onSurrender
         )
@@ -143,7 +148,7 @@ fun BattleArenaScreen(
                         border = BorderStroke(1.dp, palette.stageLine)
                     ) {
                         Text(
-                            text = "Drag anywhere to launch • Nonstop bounce until 0 HP",
+                            text = "Drag anywhere to launch • Extended nonstop clash until 0 HP",
                             style = MaterialTheme.typography.labelMedium,
                             color = Color(0xFFE2E8F0),
                             modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
@@ -195,7 +200,9 @@ private fun ArenaTopHud(
     playerName: String,
     opponentName: String,
     hudState: BattleHudState,
+    sfxEnabled: Boolean,
     palette: AppPalette,
+    onToggleSfx: () -> Unit,
     onOpenSettings: () -> Unit,
     onSurrender: () -> Unit
 ) {
@@ -205,16 +212,17 @@ private fun ArenaTopHud(
         border = BorderStroke(1.dp, palette.border),
         modifier = Modifier.fillMaxWidth()
     ) {
-        Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
+        Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 10.dp)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 // Player Fighter Column (HP + Ultimate Progress/Cooldown Bar)
                 FighterHudColumn(
                     name = playerName,
                     hp = hudState.playerHp,
+                    maxHp = hudState.playerMaxHp,
                     hpColor = palette.greenAccent,
                     ultPercent = hudState.playerUltPercent,
                     isUltActive = hudState.isPlayerUltActive,
@@ -228,8 +236,21 @@ private fun ArenaTopHud(
                     modifier = Modifier.weight(1f)
                 )
 
-                // Controls cluster
+                // Compact 48dp accessible controls cluster (SFX + Settings + Surrender)
                 Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(
+                        onClick = onToggleSfx,
+                        modifier = Modifier
+                            .size(48.dp)
+                            .testTag("arena_sfx_toggle_button")
+                    ) {
+                        Icon(
+                            imageVector = if (sfxEnabled) Icons.AutoMirrored.Outlined.VolumeUp else Icons.AutoMirrored.Outlined.VolumeOff,
+                            contentDescription = if (sfxEnabled) "Mute Sound Effects" else "Enable Sound Effects",
+                            tint = if (sfxEnabled) palette.blueAccent else palette.textMuted,
+                            modifier = Modifier.size(19.dp)
+                        )
+                    }
                     IconButton(
                         onClick = onOpenSettings,
                         modifier = Modifier
@@ -240,7 +261,7 @@ private fun ArenaTopHud(
                             Icons.Outlined.Tune,
                             contentDescription = "Engine & Theme Settings",
                             tint = palette.textSecondary,
-                            modifier = Modifier.size(20.dp)
+                            modifier = Modifier.size(19.dp)
                         )
                     }
                     IconButton(
@@ -253,7 +274,7 @@ private fun ArenaTopHud(
                             Icons.Default.Close,
                             contentDescription = "Leave Match",
                             tint = palette.textSecondary,
-                            modifier = Modifier.size(20.dp)
+                            modifier = Modifier.size(19.dp)
                         )
                     }
                 }
@@ -262,6 +283,7 @@ private fun ArenaTopHud(
                 FighterHudColumn(
                     name = opponentName,
                     hp = hudState.opponentHp,
+                    maxHp = hudState.opponentMaxHp,
                     hpColor = palette.primaryAccent,
                     ultPercent = hudState.opponentUltPercent,
                     isUltActive = hudState.isOpponentUltActive,
@@ -295,6 +317,7 @@ private fun ArenaTopHud(
 private fun FighterHudColumn(
     name: String,
     hp: Int,
+    maxHp: Int,
     hpColor: Color,
     ultPercent: Int,
     isUltActive: Boolean,
@@ -330,6 +353,8 @@ private fun FighterHudColumn(
         else -> "ULT $ultPercent%"
     }
 
+    val hpRatio = (hp.toFloat() / maxHp.coerceAtLeast(1)).coerceIn(0f, 1f)
+
     Column(modifier = modifier) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -347,13 +372,13 @@ private fun FighterHudColumn(
                 )
                 Spacer(modifier = Modifier.width(4.dp))
                 Text(
-                    text = "$hp HP",
+                    text = "$hp",
                     style = MaterialTheme.typography.labelLarge,
                     color = hpColor
                 )
             } else {
                 Text(
-                    text = "$hp HP",
+                    text = "$hp",
                     style = MaterialTheme.typography.labelLarge,
                     color = hpColor
                 )
@@ -372,7 +397,7 @@ private fun FighterHudColumn(
         Spacer(modifier = Modifier.height(4.dp))
 
         LinearProgressIndicator(
-            progress = { (hp / 100f).coerceIn(0f, 1f) },
+            progress = { hpRatio },
             modifier = Modifier
                 .fillMaxWidth()
                 .height(9.dp)
@@ -389,7 +414,7 @@ private fun FighterHudColumn(
                 .fillMaxWidth()
                 .testTag("${testTagPrefix}_ult_bar_row"),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(5.dp)
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             if (!alignRight) {
                 Icon(

@@ -136,7 +136,7 @@ fun QuestsScreen(
                                         border = BorderStroke(1.dp, palette.goldAccent.copy(alpha = 0.35f))
                                     ) {
                                         Text(
-                                            text = "+${quest.rewardGold} G",
+                                            text = "+${formatGold(quest.rewardGold)} G",
                                             style = MaterialTheme.typography.labelLarge,
                                             color = palette.goldAccent,
                                             modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)

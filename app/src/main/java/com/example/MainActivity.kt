@@ -21,6 +21,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.model.AppScreen
 import com.example.model.AppThemeMode
 import com.example.model.CharacterRoster
+import com.example.model.CharacterUpgradeState
 import com.example.model.GameMode
 import com.example.ui.screens.BattleArenaScreen
 import com.example.ui.screens.CharacterSelectScreen
@@ -64,6 +65,7 @@ fun AnimeBallClashApp(viewModel: GameViewModel) {
     val engineSettings by viewModel.engineSettings.collectAsStateWithLifecycle()
     val playerProfile by viewModel.playerProfile.collectAsStateWithLifecycle()
     val unlockedCharacterIds by viewModel.unlockedCharacterIds.collectAsStateWithLifecycle()
+    val characterUpgrades by viewModel.characterUpgrades.collectAsStateWithLifecycle()
     val quests by viewModel.quests.collectAsStateWithLifecycle()
     val leaderboard by viewModel.leaderboard.collectAsStateWithLifecycle()
     val selectedMode by viewModel.selectedMode.collectAsStateWithLifecycle()
@@ -84,6 +86,8 @@ fun AnimeBallClashApp(viewModel: GameViewModel) {
     val playerChar = remember(playerProfile.selectedCharacterId) {
         CharacterRoster.getById(playerProfile.selectedCharacterId)
     }
+
+    val activeUpgrades = characterUpgrades[playerProfile.selectedCharacterId] ?: CharacterUpgradeState()
 
     // Dynamically match system bar icon contrast to Dark vs Light mode
     val view = LocalView.current
@@ -107,6 +111,7 @@ fun AnimeBallClashApp(viewModel: GameViewModel) {
         AppScreen.HOME_HUB -> {
             HomeHubScreen(
                 profile = playerProfile,
+                activeUpgrades = activeUpgrades,
                 unlockedCount = unlockedCharacterIds.size,
                 claimableQuestCount = claimableQuestCount,
                 selectedDifficulty = botDifficulty,
@@ -129,9 +134,11 @@ fun AnimeBallClashApp(viewModel: GameViewModel) {
             CharacterSelectScreen(
                 profile = playerProfile,
                 unlockedIds = unlockedCharacterIds,
+                characterUpgrades = characterUpgrades,
                 claimableQuestCount = claimableQuestCount,
                 onSelectCharacter = { charId -> viewModel.selectCharacter(charId) },
                 onUnlockCharacter = { char -> viewModel.unlockCharacter(char) },
+                onUpgradeStat = { charId, stat -> viewModel.upgradeCharacterStat(charId, stat) },
                 onStartBattle = { viewModel.startMatchmaking(GameMode.PRACTICE_BOT) },
                 onNavigate = { screen -> viewModel.navigateTo(screen) },
                 onBack = { viewModel.navigateTo(AppScreen.HOME_HUB) }
@@ -170,8 +177,10 @@ fun AnimeBallClashApp(viewModel: GameViewModel) {
             ShopScreen(
                 profile = playerProfile,
                 unlockedIds = unlockedCharacterIds,
+                characterUpgrades = characterUpgrades,
                 claimableQuestCount = claimableQuestCount,
                 onUnlockCharacter = { char -> viewModel.unlockCharacter(char) },
+                onUpgradeStat = { charId, stat -> viewModel.upgradeCharacterStat(charId, stat) },
                 onNavigate = { screen -> viewModel.navigateTo(screen) },
                 onBack = { viewModel.navigateTo(AppScreen.HOME_HUB) }
             )
@@ -216,6 +225,7 @@ private fun BattleArenaRoute(viewModel: GameViewModel) {
             },
             onQuickLaunchOpening = { viewModel.onQuickLaunchOpening() },
             onTriggerUltimate = { viewModel.onPlayerTriggerUltimate() },
+            onToggleSfx = { viewModel.toggleSfx() },
             onSurrender = { viewModel.navigateTo(AppScreen.HOME_HUB) },
             onSaveEngineSettings = { newSettings ->
                 viewModel.updateEngineSettings(newSettings)

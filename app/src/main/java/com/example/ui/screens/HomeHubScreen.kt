@@ -25,6 +25,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.outlined.DarkMode
 import androidx.compose.material.icons.outlined.Edit
@@ -38,6 +39,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
@@ -58,9 +60,9 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.model.AppScreen
-import com.example.model.AppThemeMode
 import com.example.model.BotDifficulty
 import com.example.model.CharacterRoster
+import com.example.model.CharacterUpgradeState
 import com.example.model.EngineSettings
 import com.example.model.GameMode
 import com.example.model.PlayerProfile
@@ -68,10 +70,12 @@ import com.example.ui.components.AnimeBallRenderer
 import com.example.ui.components.GraphicsConfigDialog
 import com.example.ui.components.HubNavigationBar
 import com.example.ui.theme.AppTheme
+import java.util.Locale
 
 @Composable
 fun HomeHubScreen(
     profile: PlayerProfile,
+    activeUpgrades: CharacterUpgradeState,
     unlockedCount: Int,
     claimableQuestCount: Int,
     selectedDifficulty: BotDifficulty,
@@ -94,6 +98,10 @@ fun HomeHubScreen(
     val activeCharacter = remember(profile.selectedCharacterId) {
         CharacterRoster.getById(profile.selectedCharacterId)
     }
+
+    val effHp = activeUpgrades.effectiveMaxHp(activeCharacter.maxHp)
+    val effDmg = activeUpgrades.effectiveBaseDamage(activeCharacter.baseDamage)
+    val effCd = activeUpgrades.effectiveUltimateCooldown(activeCharacter.ultimateCooldownSeconds)
 
     Scaffold(
         containerColor = palette.background,
@@ -188,14 +196,14 @@ fun HomeHubScreen(
                                 horizontalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
                                 CurrencyPill(
-                                    label = "${profile.gold} G",
+                                    label = "${formatGold(profile.gold)} G",
                                     bgColor = palette.goldAccentSoft,
                                     textColor = palette.goldAccent
                                 )
                                 IconButton(
                                     onClick = onQuickToggleTheme,
                                     modifier = Modifier
-                                        .size(44.dp)
+                                        .size(48.dp)
                                         .clip(CircleShape)
                                         .background(palette.elevatedSurface)
                                         .testTag("quick_theme_toggle_button")
@@ -210,7 +218,7 @@ fun HomeHubScreen(
                                 IconButton(
                                     onClick = { showSettingsDialog = true },
                                     modifier = Modifier
-                                        .size(44.dp)
+                                        .size(48.dp)
                                         .clip(CircleShape)
                                         .background(palette.elevatedSurface)
                                         .testTag("open_settings_button")
@@ -259,7 +267,6 @@ fun HomeHubScreen(
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Column(modifier = Modifier.padding(16.dp)) {
-                        // Dark Arena Showcase Stage with Character Aura Backdrop
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -268,7 +275,7 @@ fun HomeHubScreen(
                                 .border(1.dp, palette.stageLine, RoundedCornerShape(18.dp))
                                 .drawBehind {
                                     drawCircle(
-                                        color = activeCharacter.auraColor.copy(alpha = 0.14f),
+                                        color = activeCharacter.auraColor.copy(alpha = 0.16f),
                                         radius = size.minDimension * 0.56f,
                                         center = Offset(size.width * 0.5f, size.height * 0.54f)
                                     )
@@ -305,7 +312,11 @@ fun HomeHubScreen(
                                             shape = RoundedCornerShape(8.dp)
                                         ) {
                                             Text(
-                                                text = "${activeCharacter.classType.displayName} • ${activeCharacter.popularityTier.displayName}",
+                                                text = if (activeUpgrades.totalUpgrades > 0) {
+                                                    "${activeCharacter.classType.displayName} • +${activeUpgrades.totalUpgrades} Forged"
+                                                } else {
+                                                    "${activeCharacter.classType.displayName} • ${activeCharacter.popularityTier.displayName}"
+                                                },
                                                 style = MaterialTheme.typography.labelSmall,
                                                 color = Color(0xFFD6DEEE),
                                                 modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
@@ -394,15 +405,37 @@ fun HomeHubScreen(
 
                         Spacer(modifier = Modifier.height(12.dp))
 
-                        // Crisp 4-column tactical stat chips
+                        // Crisp 4-column upgraded tactical stat chips (HP, DMG, SPEED, ULT CD)
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            StatPillCard("DMG", "${activeCharacter.baseDamage}", Modifier.weight(1f))
-                            StatPillCard("SPEED", "${String.format("%.2fx", activeCharacter.speedRating)}", Modifier.weight(1f))
-                            StatPillCard("MASS", "${String.format("%.2f", activeCharacter.massRating)}", Modifier.weight(1f))
-                            StatPillCard("ULT CD", "${activeCharacter.ultimateCooldownSeconds.toInt()}s", Modifier.weight(1f))
+                            StatPillCard("MAX HP", "$effHp", Modifier.weight(1f))
+                            StatPillCard("POWER", "$effDmg", Modifier.weight(1f))
+                            StatPillCard("SPEED", String.format(Locale.US, "%.2fx", activeCharacter.speedRating), Modifier.weight(1f))
+                            StatPillCard("ULT CD", String.format(Locale.US, "%.1fs", effCd), Modifier.weight(1f))
+                        }
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        OutlinedButton(
+                            onClick = { onNavigate(AppScreen.SHOP) },
+                            shape = RoundedCornerShape(12.dp),
+                            border = BorderStroke(1.dp, palette.goldAccent.copy(alpha = 0.55f)),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(48.dp)
+                                .testTag("upgrade_shortcut_button")
+                        ) {
+                            Icon(Icons.Default.Bolt, contentDescription = null, tint = palette.goldAccent, modifier = Modifier.size(17.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "Upgrade Health, Power & Lower CD • Recruit 220+ Fighters",
+                                style = MaterialTheme.typography.labelLarge,
+                                color = palette.goldAccent,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
                         }
 
                         Spacer(modifier = Modifier.height(12.dp))
@@ -413,7 +446,7 @@ fun HomeHubScreen(
                             badge = "PASSIVE",
                             badgeBg = palette.blueAccentSoft,
                             badgeFg = palette.blueAccent,
-                            title = activeCharacter.passiveName,
+                            title = "${activeCharacter.passiveName} (${activeCharacter.passiveArchetype.shortTag})",
                             desc = activeCharacter.passiveDescription
                         )
                         Spacer(modifier = Modifier.height(8.dp))
@@ -509,7 +542,7 @@ fun HomeHubScreen(
                                         border = BorderStroke(1.dp, if (active) palette.goldAccent else Color.Transparent),
                                         modifier = Modifier
                                             .weight(1f)
-                                            .height(40.dp)
+                                            .height(48.dp)
                                     ) {
                                         Box(contentAlignment = Alignment.Center) {
                                             Text(

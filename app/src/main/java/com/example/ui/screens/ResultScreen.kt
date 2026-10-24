@@ -136,12 +136,12 @@ fun ResultScreen(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        RewardChip("+${stats.goldEarned} Gold", palette.goldAccentSoft, palette.goldAccent, Modifier.weight(1f))
+                        RewardChip("+${formatGold(stats.goldEarned)} Gold", palette.goldAccentSoft, palette.goldAccent, Modifier.weight(1f))
                         RewardChip("+${stats.gemsEarned} Gems", palette.blueAccentSoft, palette.blueAccent, Modifier.weight(1f))
                         RewardChip("+${stats.expEarned} XP", palette.elevatedSurface, palette.textPrimary, Modifier.weight(1f))
                     }
                     Text(
-                        text = "Balance: ${profile.gold} Gold • Lv.${profile.level} (${profile.exp}/${profile.maxExp} XP)",
+                        text = "Balance: ${formatGold(profile.gold)} Gold • Lv.${profile.level} (${profile.exp}/${profile.maxExp} XP)",
                         style = MaterialTheme.typography.labelMedium,
                         color = palette.textSecondary
                     )

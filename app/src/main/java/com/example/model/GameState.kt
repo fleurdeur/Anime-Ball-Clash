@@ -15,7 +15,7 @@ enum class AppScreen {
 enum class GameMode(val title: String, val tagLabel: String, val subtitle: String) {
     PRACTICE_BOT("Solo Practice", "AI Bot", "Train nonstop ricochet combos against adaptive AI tiers"),
     ONLINE_MATCH("Ranked Arena", "Competitive", "Climb from Unranked to Master in high-stakes 1v1 clashes"),
-    FRIENDS_LOBBY("Exhibition Duel", "Free Play", "Fast custom 1v1 arena bout with balanced tournament rules")
+    FRIENDS_LOBBY("Exhibition Duel", "Free Play", "Extended tournament-length 1v1 bout with full passives")
 }
 
 enum class BotDifficulty(
@@ -116,38 +116,48 @@ object InitialGameData {
             description = "Complete 1 nonstop arena battle in any mode.",
             currentProgress = 0,
             targetProgress = 1,
-            rewardGold = 200,
-            rewardGems = 10,
+            rewardGold = 1_800,
+            rewardGems = 15,
+            isClaimed = false
+        ),
+        QuestItem(
+            id = "q_upgrade_forge",
+            title = "Ascension Forge",
+            description = "Upgrade any fighter's Health, Power, or Lower CD stat 1 time.",
+            currentProgress = 0,
+            targetProgress = 1,
+            rewardGold = 2_500,
+            rewardGems = 20,
             isClaimed = false
         ),
         QuestItem(
             id = "q_wall_ricochet",
             title = "Pinball Kineticist",
-            description = "Trigger 25 wall ricochets across arena matches.",
+            description = "Trigger 40 wall ricochets across arena matches.",
             currentProgress = 0,
-            targetProgress = 25,
-            rewardGold = 350,
-            rewardGems = 15,
+            targetProgress = 40,
+            rewardGold = 3_800,
+            rewardGems = 25,
             isClaimed = false
         ),
         QuestItem(
             id = "q_awakenings",
             title = "Limit Breaker",
-            description = "Activate an Ultimate Awakening 2 times in combat.",
+            description = "Activate an Ultimate Awakening 3 times in combat.",
             currentProgress = 0,
-            targetProgress = 2,
-            rewardGold = 400,
-            rewardGems = 20,
+            targetProgress = 3,
+            rewardGold = 5_200,
+            rewardGems = 35,
             isClaimed = false
         ),
         QuestItem(
             id = "q_clean_victory",
             title = "Decisive Knockout",
-            description = "Win a match with at least 40 HP remaining.",
+            description = "Win an extended clash with at least 120 HP remaining.",
             currentProgress = 0,
             targetProgress = 1,
-            rewardGold = 500,
-            rewardGems = 25,
+            rewardGold = 6_800,
+            rewardGems = 45,
             isClaimed = false
         ),
         QuestItem(
@@ -156,8 +166,8 @@ object InitialGameData {
             description = "Win 3 arena clashes against AI or Ranked rivals.",
             currentProgress = 0,
             targetProgress = 3,
-            rewardGold = 650,
-            rewardGems = 35,
+            rewardGold = 9_500,
+            rewardGems = 60,
             isClaimed = false
         )
     )
@@ -193,8 +203,8 @@ object InitialGameData {
 
     val combatTips = listOf(
         "Once launched, both spheres ricochet nonstop off walls and each other until one hits 0 HP.",
-        "Both you and the AI charge Ultimate meters to 100%, unleash Awakenings, and enter cooldown.",
-        "Every wall bounce before hitting your rival adds bank-shot bonus damage.",
+        "Every fighter has a live combat passive that triggers on clash, wall ricochet, or defense.",
+        "Invest Gold in Vitality Core (HP), Attack Force (PWR), and Chrono Drive (Lower CD) upgrades.",
         "Drag anywhere on the court when Redirect is ready to bend your trajectory mid-flight."
     )
 }

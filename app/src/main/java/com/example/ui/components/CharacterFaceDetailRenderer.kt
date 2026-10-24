@@ -10,9 +10,15 @@ import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import com.example.model.CharacterData
+import com.example.model.CrownVisualStyle
+import com.example.model.EyeVisualStyle
+import com.example.model.FaceMarkVisualStyle
+import kotlin.math.PI
+import kotlin.math.cos
+import kotlin.math.sin
 
 /**
- * Character-specific facial markings, visors, masks, scars, and eyes for all 48 fighters.
+ * High-detail facial markings, visors, masks, scars, and anime eye styles across all 224 fighters.
  * Every helper draws strictly in local coordinates centered at Offset.Zero inside
  * AnimeBallRenderer's unified withTransform so zero details ever lag or detach!
  */
@@ -216,10 +222,8 @@ object CharacterFaceDetailRenderer {
                 drawCircle(Color.White, r * 0.055f, Offset(rx, ey))
             }
 
-            // --- 28 NEW PROTAGONISTS & ANTAGONISTS ---
             "midoriya_ofa" -> {
                 drawScowlEyes(r, Color(0xFF10B981))
-                // Iconic cheek freckles + silver respirator collar
                 for (side in intArrayOf(-1, 1)) {
                     drawCircle(inkColor, r * 0.035f, Offset(side * r * 0.50f, r * 0.14f))
                     drawCircle(inkColor, r * 0.035f, Offset(side * r * 0.58f, r * 0.21f))
@@ -229,7 +233,6 @@ object CharacterFaceDetailRenderer {
 
             "shigaraki_decay" -> {
                 drawScowlEyes(r, Color(0xFFEF4444))
-                // Pale Father-hand clasp gripping across nose/bridge
                 drawRoundRect(Color(0xFFCBD5E1), Offset(-r * 0.24f, -r * 0.26f), Size(r * 0.48f, r * 0.42f), CornerRadius(6f, 6f))
                 for (f in -1..1) {
                     drawLine(Color(0xFF94A3B8), Offset(f * r * 0.14f, -r * 0.26f), Offset(f * r * 0.18f, -r * 0.55f), strokeWidth = r * 0.09f, cap = StrokeCap.Round)
@@ -237,7 +240,6 @@ object CharacterFaceDetailRenderer {
             }
 
             "frieza_emperor" -> {
-                // Glossy purple dome Bio-Gem + vertical cheek lines + crimson tyrant eyes
                 drawOval(Color(0xFF7E22CE), Offset(-r * 0.46f, -r * 0.86f), Size(r * 0.92f, r * 0.52f))
                 drawOval(Color(0xFFC084FC).copy(alpha = 0.5f), Offset(-r * 0.24f, -r * 0.78f), Size(r * 0.30f, r * 0.20f))
                 drawLine(Color(0xFF581C87), Offset(-r * 0.32f, r * 0.08f), Offset(-r * 0.32f, r * 0.42f), strokeWidth = 2.4f)
@@ -246,7 +248,6 @@ object CharacterFaceDetailRenderer {
             }
 
             "muzan_progenitor" -> {
-                // glowing plum demon cat-eyes + crimson tie
                 drawScowlEyes(r, Color(0xFFE11D48))
                 drawLine(inkColor, Offset(-r * 0.32f, -r * 0.11f), Offset(-r * 0.32f, r * 0.03f), strokeWidth = 2.2f)
                 drawLine(inkColor, Offset(r * 0.32f, -r * 0.11f), Offset(r * 0.32f, r * 0.03f), strokeWidth = 2.2f)
@@ -254,18 +255,12 @@ object CharacterFaceDetailRenderer {
             }
 
             "makima_control" -> {
-                // Hypnotic golden concentric ringed Control Devil eyes!
-                for (sx in floatArrayOf(-r * 0.32f, r * 0.32f)) {
-                    drawCircle(Color(0xFFFEF08A), r * 0.18f, Offset(sx, -r * 0.02f))
-                    drawCircle(Color(0xFFDC2626), r * 0.14f, Offset(sx, -r * 0.02f), style = Stroke(width = 2.2f))
-                    drawCircle(Color(0xFFDC2626), r * 0.07f, Offset(sx, -r * 0.02f), style = Stroke(width = 1.8f))
-                }
+                drawHypnoticRingEyes(r, Color(0xFFFEF08A), Color(0xFFDC2626))
                 drawLine(Color.White, Offset(-r * 0.25f, r * 0.38f), Offset(0f, r * 0.56f), strokeWidth = 3f)
                 drawLine(Color.White, Offset(r * 0.25f, r * 0.38f), Offset(0f, r * 0.56f), strokeWidth = 3f)
             }
 
             "dio_world" -> {
-                // Emerald heart headband + crimson vampire eyes
                 drawRoundRect(Color(0xFF15803D), Offset(-r * 0.78f, -r * 0.54f), Size(r * 1.56f, r * 0.22f), CornerRadius(4f, 4f))
                 drawCircle(Color(0xFF22C55E), r * 0.11f, Offset(0f, -r * 0.43f))
                 drawScowlEyes(r, Color(0xFFDC2626))
@@ -273,7 +268,6 @@ object CharacterFaceDetailRenderer {
 
             "aizen_kyoka" -> {
                 drawScowlEyes(r, Color(0xFF7C3AED))
-                // Glowing violet Hogyoku orb embedded in center collar + single hair bang
                 drawLine(Color(0xFF451A03), Offset(r * 0.05f, -r * 0.75f), Offset(-r * 0.06f, r * 0.08f), strokeWidth = 3.2f, cap = StrokeCap.Round)
                 drawCircle(Color(0xFFA855F7), r * 0.13f, Offset(0f, r * 0.46f))
                 drawCircle(Color.White, r * 0.05f, Offset(0f, r * 0.46f))
@@ -281,23 +275,14 @@ object CharacterFaceDetailRenderer {
 
             "blackbeard_tremor" -> {
                 drawScowlEyes(r, inkColor)
-                // Scruffy black pirate beard + iconic missing-tooth grin
                 drawArc(Color(0xFF09090B), 10f, 160f, true, Offset(-r * 0.85f, -r * 0.20f), Size(r * 1.70f, r * 1.15f))
                 drawRoundRect(Color.White, Offset(-r * 0.36f, r * 0.24f), Size(r * 0.72f, r * 0.20f), CornerRadius(4f, 4f))
                 drawRect(inkColor, Offset(r * 0.04f, r * 0.24f), Size(r * 0.13f, r * 0.12f))
             }
 
-            "madara_uchiha" -> {
-                // Glowing violet Rinnegan concentric ripple eyes
-                for (sx in floatArrayOf(-r * 0.32f, r * 0.32f)) {
-                    drawCircle(Color(0xFFC4B5FD), r * 0.17f, Offset(sx, -r * 0.03f))
-                    drawCircle(Color(0xFF4C1D95), r * 0.13f, Offset(sx, -r * 0.03f), style = Stroke(width = 1.8f))
-                    drawCircle(inkColor, r * 0.05f, Offset(sx, -r * 0.03f))
-                }
-            }
+            "madara_uchiha" -> drawRinneganEyes(r)
 
             "rimuru_tempest" -> {
-                // Translucent cute golden slime eyes + rosy slime blush marks
                 drawOval(Color(0xFFFACC15), Offset(-r * 0.42f, -r * 0.10f), Size(r * 0.22f, r * 0.26f))
                 drawOval(Color(0xFFFACC15), Offset(r * 0.20f, -r * 0.10f), Size(r * 0.22f, r * 0.26f))
                 drawLine(Color(0xFFF472B6), Offset(-r * 0.56f, r * 0.18f), Offset(-r * 0.44f, r * 0.18f), strokeWidth = 2.6f, cap = StrokeCap.Round)
@@ -305,7 +290,6 @@ object CharacterFaceDetailRenderer {
             }
 
             "okarun_turbo" -> {
-                // Round glowing spectacles + black Turbo Granny jaw-teeth mask!
                 for (sx in floatArrayOf(-r * 0.33f, r * 0.33f)) {
                     drawCircle(Color.White, r * 0.20f, Offset(sx, -r * 0.08f))
                     drawCircle(Color(0xFFEF4444), r * 0.20f, Offset(sx, -r * 0.08f), style = Stroke(width = 2.4f))
@@ -318,7 +302,6 @@ object CharacterFaceDetailRenderer {
             }
 
             "kafka_kaiju" -> {
-                // Glowing cyan Kaiju No. 8 eyes + skeletal cyan monster jaw fissures
                 drawScowlEyes(r, Color(0xFF22D3EE))
                 drawRoundRect(Color(0xFF22D3EE), Offset(-r * 0.48f, r * 0.24f), Size(r * 0.96f, r * 0.24f), CornerRadius(6f, 6f))
                 for (t in -2..2) {
@@ -327,24 +310,16 @@ object CharacterFaceDetailRenderer {
             }
 
             "meruem_chimera" -> {
-                // Royal Chimera green carapace dome ridge + crimson eyes
                 drawArc(Color(0xFF166534), 190f, 160f, true, Offset(-r * 0.90f, -r * 0.95f), Size(r * 1.80f, r * 0.85f))
                 drawScowlEyes(r, Color(0xFFE11D48))
             }
 
             "guts_berserk" -> {
-                // Closed scarred right eye + blazing crimson left eye + white hair streak
-                val lx = -r * 0.32f
-                val rx = r * 0.32f
-                val ey = -r * 0.04f
-                drawOval(Color.White, Offset(lx - r * 0.18f, ey - r * 0.12f), Size(r * 0.36f, r * 0.24f))
-                drawCircle(if (isUlt) Color(0xFFEF4444) else inkColor, r * 0.09f, Offset(lx, ey))
-                drawLine(inkColor, Offset(rx - r * 0.18f, ey), Offset(rx + r * 0.18f, ey), strokeWidth = 3f, cap = StrokeCap.Round)
+                drawScarredOneEye(r, if (isUlt) Color(0xFFEF4444) else inkColor)
                 drawLine(Color.White, Offset(-r * 0.15f, -r * 0.88f), Offset(-r * 0.05f, -r * 0.45f), strokeWidth = r * 0.12f, cap = StrokeCap.Round)
             }
 
             "griffith_femto" -> {
-                // Sharp falcon helm beak visor + glowing hawk eyes
                 sharedPath.reset()
                 sharedPath.moveTo(-r * 0.75f, -r * 0.40f)
                 sharedPath.lineTo(0f, r * 0.18f)
@@ -355,20 +330,17 @@ object CharacterFaceDetailRenderer {
             }
 
             "ryuko_scissor" -> {
-                // Iconic crimson bang streak + golden Senketsu collar eyes
                 drawLine(Color(0xFFEF4444), Offset(-r * 0.36f, -r * 0.86f), Offset(-r * 0.52f, -r * 0.18f), strokeWidth = r * 0.15f, cap = StrokeCap.Round)
                 drawScowlEyes(r, Color(0xFF3B82F6))
                 drawCircle(Color(0xFFFACC15), r * 0.09f, Offset(-r * 0.38f, r * 0.48f))
             }
 
             "gabimaru_hollow" -> {
-                // Dark shinobi mouth-scarf + golden hollow eyes
                 drawScowlEyes(r, Color(0xFFFACC15))
                 drawRoundRect(Color(0xFF0F172A), Offset(-r * 0.76f, r * 0.18f), Size(r * 1.52f, r * 0.46f), CornerRadius(10f, 10f))
             }
 
             "ainz_overlord" -> {
-                // Dark skeletal eye sockets with blazing crimson pinprick soul-flames!
                 for (sx in floatArrayOf(-r * 0.32f, r * 0.32f)) {
                     drawCircle(Color(0xFF09090B), r * 0.21f, Offset(sx, -r * 0.04f))
                     drawCircle(Color(0xFFEF4444), r * 0.08f, Offset(sx, -r * 0.04f))
@@ -380,27 +352,13 @@ object CharacterFaceDetailRenderer {
 
             "gilgamesh_babylon" -> {
                 drawScowlEyes(r, Color(0xFFDC2626))
-                // Crimson tattoos + golden collar
                 drawLine(Color(0xFFDC2626), Offset(-r * 0.62f, r * 0.22f), Offset(-r * 0.32f, r * 0.38f), strokeWidth = 2.4f)
                 drawLine(Color(0xFFDC2626), Offset(r * 0.62f, r * 0.22f), Offset(r * 0.32f, r * 0.38f), strokeWidth = 2.4f)
             }
 
-            "simon_spiral" -> {
-                // Blazing crimson star-visor Gurren shades!
-                sharedPath.reset()
-                sharedPath.moveTo(-r * 0.86f, -r * 0.24f)
-                sharedPath.lineTo(0f, -r * 0.04f)
-                sharedPath.lineTo(r * 0.86f, -r * 0.24f)
-                sharedPath.lineTo(r * 0.52f, r * 0.14f)
-                sharedPath.lineTo(0f, 0f)
-                sharedPath.lineTo(-r * 0.52f, r * 0.14f)
-                sharedPath.close()
-                drawPath(sharedPath, Color(0xFFEF4444))
-                drawPath(sharedPath, Color.White, style = Stroke(width = 2f, join = StrokeJoin.Round))
-            }
+            "simon_spiral" -> drawStarShades(r, Color(0xFFEF4444))
 
             "vash_stampede" -> {
-                // Iconic round amber-orange tinted sunglasses!
                 drawLine(inkColor, Offset(-r * 0.55f, -r * 0.04f), Offset(r * 0.55f, -r * 0.04f), strokeWidth = 2.4f)
                 for (sx in floatArrayOf(-r * 0.30f, r * 0.30f)) {
                     drawCircle(Color(0xFFF59E0B), r * 0.20f, Offset(sx, -r * 0.04f))
@@ -409,7 +367,6 @@ object CharacterFaceDetailRenderer {
             }
 
             "bondrewd_dawn" -> {
-                // Unmistakable Made in Abyss vertical glowing magenta visor slit!
                 drawRoundRect(Color(0xFF09090B), Offset(-r * 0.82f, -r * 0.82f), Size(r * 1.64f, r * 1.64f), CornerRadius(r, r))
                 drawLine(Color(0xFFD946EF), Offset(0f, -r * 0.84f), Offset(0f, r * 0.84f), strokeWidth = r * 0.18f, cap = StrokeCap.Round)
                 drawLine(Color.White, Offset(0f, -r * 0.74f), Offset(0f, r * 0.74f), strokeWidth = r * 0.06f, cap = StrokeCap.Round)
@@ -417,13 +374,11 @@ object CharacterFaceDetailRenderer {
 
             "phosphophyllite_gem" -> {
                 drawScowlEyes(r, Color(0xFF2DD4BF))
-                // Kintsugi golden alloy veins across cheek
                 drawLine(Color(0xFFFACC15), Offset(-r * 0.65f, r * 0.10f), Offset(-r * 0.20f, r * 0.45f), strokeWidth = 2.8f, cap = StrokeCap.Round)
                 drawLine(Color(0xFFFACC15), Offset(r * 0.58f, -r * 0.25f), Offset(r * 0.28f, r * 0.35f), strokeWidth = 2.5f, cap = StrokeCap.Round)
             }
 
             "caiman_dorohedoro" -> {
-                // Black cross-marks directly over Caiman's reptile eyes!
                 for (sx in floatArrayOf(-r * 0.32f, r * 0.32f)) {
                     drawLine(inkColor, Offset(sx, -r * 0.32f), Offset(sx, r * 0.24f), strokeWidth = 3.2f)
                     drawLine(inkColor, Offset(sx - r * 0.22f, -r * 0.04f), Offset(sx + r * 0.22f, -r * 0.04f), strokeWidth = 3.2f)
@@ -432,7 +387,6 @@ object CharacterFaceDetailRenderer {
             }
 
             "en_dorohedoro" -> {
-                // Fungal crimson mushroom mask across lower face
                 drawRoundRect(Color(0xFF991B1B), Offset(-r * 0.56f, r * 0.08f), Size(r * 1.12f, r * 0.48f), CornerRadius(10f, 10f))
                 drawCircle(Color(0xFFFECDD3), r * 0.07f, Offset(-r * 0.26f, r * 0.28f))
                 drawCircle(Color(0xFFFECDD3), r * 0.07f, Offset(r * 0.24f, r * 0.32f))
@@ -440,41 +394,227 @@ object CharacterFaceDetailRenderer {
             }
 
             "hyakkimaru_dororo" -> {
-                // Serene porcelain samurai gaze + crimson scarf
                 drawScowlEyes(r, Color(0xFF78350F))
                 drawLine(Color(0xFF991B1B), Offset(-r * 0.64f, r * 0.44f), Offset(r * 0.64f, r * 0.44f), strokeWidth = r * 0.16f, cap = StrokeCap.Round)
             }
 
             "tetsuo_psychic" -> {
-                // Intense psychic forehead veins + crimson Akira cape collar
                 drawScowlEyes(r, if (isUlt) Color(0xFFEF4444) else inkColor)
                 drawLine(Color(0xFFDC2626), Offset(-r * 0.70f, r * 0.42f), Offset(r * 0.70f, r * 0.42f), strokeWidth = r * 0.22f, cap = StrokeCap.Round)
             }
 
             "accelerator_vector" -> {
-                // Snowy jagged hair + piercing crimson esper eyes + black/white chevron collar
                 drawScowlEyes(r, Color(0xFFEF4444))
                 drawLine(Color.White, Offset(-r * 0.46f, r * 0.42f), Offset(0f, r * 0.28f), strokeWidth = 2.8f)
                 drawLine(Color.White, Offset(0f, r * 0.28f), Offset(r * 0.46f, r * 0.42f), strokeWidth = 2.8f)
             }
 
             else -> {
-                drawScowlEyes(r, inkColor)
+                // --- HIGH-DETAIL PROCEDURAL ANIME FACE SYSTEM FOR ALL 180+ EXPANSION FIGHTERS ---
+                if (char.resolvedCrownStyle == CrownVisualStyle.SHINOBI_HEADBAND) {
+                    drawRoundRect(Color(0xFF0F172A), Offset(-r * 0.78f, -r * 0.60f), Size(r * 1.56f, r * 0.26f), CornerRadius(6f, 6f))
+                    drawRoundRect(Color(0xFFCBD5E1), Offset(-r * 0.44f, -r * 0.57f), Size(r * 0.88f, r * 0.20f), CornerRadius(4f, 4f))
+                }
+
+                // 1. Signature facial markings / masks / tattoos
+                drawProceduralFaceMark(char, r)
+
+                // 2. Signature anime eye archetype
+                val iris = if (isUlt) char.auraColor else char.auraColor
+                when (char.resolvedEyeStyle) {
+                    EyeVisualStyle.CRIMSON_SHARINGAN -> drawSharinganEyes(r)
+                    EyeVisualStyle.RINNEGAN_RIPPLE -> drawRinneganEyes(r)
+                    EyeVisualStyle.HYPNOTIC_RINGS -> drawHypnoticRingEyes(r, Color(0xFFFEF08A), char.auraColor)
+                    EyeVisualStyle.SIX_EYES_VISOR -> {
+                        drawRoundRect(Color(0xFF09090B), Offset(-r * 0.90f, -r * 0.26f), Size(r * 1.80f, r * 0.46f), CornerRadius(r * 0.12f, r * 0.12f))
+                        drawCircle(char.auraColor, r * 0.12f, Offset(-r * 0.32f, -r * 0.03f))
+                        drawCircle(char.auraColor, r * 0.12f, Offset(r * 0.32f, -r * 0.03f))
+                    }
+                    EyeVisualStyle.CYBER_VISOR -> {
+                        sharedPath.reset()
+                        sharedPath.moveTo(-r * 0.78f, -r * 0.18f)
+                        sharedPath.lineTo(r * 0.78f, -r * 0.18f)
+                        sharedPath.lineTo(r * 0.62f, r * 0.12f)
+                        sharedPath.lineTo(0f, r * 0.02f)
+                        sharedPath.lineTo(-r * 0.62f, r * 0.12f)
+                        sharedPath.close()
+                        drawPath(sharedPath, char.auraColor)
+                        drawPath(sharedPath, inkColor, style = Stroke(width = 2.2f, join = StrokeJoin.Round))
+                        drawLine(Color.White.copy(alpha = 0.75f), Offset(-r * 0.58f, -r * 0.08f), Offset(r * 0.24f, -r * 0.08f), strokeWidth = 2.2f, cap = StrokeCap.Round)
+                    }
+                    EyeVisualStyle.STAR_SHADES -> drawStarShades(r, char.auraColor)
+                    EyeVisualStyle.DEMON_SLIT -> {
+                        drawScowlEyes(r, char.auraColor)
+                        drawLine(inkColor, Offset(-r * 0.30f, -r * 0.12f), Offset(-r * 0.30f, r * 0.04f), strokeWidth = 2.4f)
+                        drawLine(inkColor, Offset(r * 0.30f, -r * 0.12f), Offset(r * 0.30f, r * 0.04f), strokeWidth = 2.4f)
+                    }
+                    EyeVisualStyle.HOLLOW_MASK -> {
+                        drawArc(Color(0xFFF8FAFC), 95f, 170f, true, Offset(-r * 0.92f, -r * 0.92f), Size(r * 1.84f, r * 1.84f))
+                        drawLine(char.auraColor, Offset(-r * 0.48f, -r * 0.56f), Offset(-r * 0.32f, r * 0.42f), strokeWidth = r * 0.09f, cap = StrokeCap.Round)
+                        drawScowlEyes(r, char.auraColor)
+                    }
+                    EyeVisualStyle.ESPER_PSYCHIC -> {
+                        for (sx in floatArrayOf(-r * 0.31f, r * 0.31f)) {
+                            drawCircle(char.auraColor, r * 0.17f, Offset(sx, -r * 0.03f))
+                            drawCircle(Color.White, r * 0.08f, Offset(sx, -r * 0.03f))
+                            drawCircle(inkColor, r * 0.17f, Offset(sx, -r * 0.03f), style = Stroke(width = 1.9f))
+                        }
+                    }
+                    EyeVisualStyle.SERENE_NOBLE -> {
+                        for (sx in floatArrayOf(-r * 0.30f, r * 0.30f)) {
+                            drawOval(Color.White, Offset(sx - r * 0.16f, -r * 0.15f), Size(r * 0.32f, r * 0.26f))
+                            drawOval(iris, Offset(sx - r * 0.11f, -r * 0.12f), Size(r * 0.22f, r * 0.22f))
+                            drawCircle(inkColor, r * 0.055f, Offset(sx, -r * 0.02f))
+                            drawCircle(Color.White, r * 0.045f, Offset(sx - r * 0.04f, -r * 0.07f))
+                            drawArc(inkColor, 200f, 140f, false, Offset(sx - r * 0.18f, -r * 0.18f), Size(r * 0.36f, r * 0.20f), style = Stroke(width = 2.4f, cap = StrokeCap.Round))
+                        }
+                    }
+                    EyeVisualStyle.SCARRED_ONE_EYE -> drawScarredOneEye(r, iris)
+                    EyeVisualStyle.FIERCE_SHONEN -> drawScowlEyes(r, iris)
+                }
             }
         }
     }
 
-    private fun DrawScope.drawScowlEyes(r: Float, irisColor: Color) {
+    private fun DrawScope.drawProceduralFaceMark(char: CharacterData, r: Float) {
+        when (char.resolvedFaceMarkStyle) {
+            FaceMarkVisualStyle.NONE -> Unit
+
+            FaceMarkVisualStyle.WHISKER_MARKS -> {
+                for (side in intArrayOf(-1, 1)) {
+                    for (row in -1..1) {
+                        val y = r * 0.16f + row * r * 0.09f
+                        drawLine(inkColor, Offset(side * r * 0.42f, y), Offset(side * r * 0.68f, y + row * r * 0.03f), strokeWidth = 2.0f, cap = StrokeCap.Round)
+                    }
+                }
+            }
+
+            FaceMarkVisualStyle.FOREHEAD_SCAR -> {
+                drawLine(Color(0xFF991B1B), Offset(-r * 0.42f, -r * 0.52f), Offset(-r * 0.14f, -r * 0.34f), strokeWidth = 2.6f, cap = StrokeCap.Round)
+                drawLine(Color(0xFF991B1B), Offset(-r * 0.28f, -r * 0.54f), Offset(-r * 0.26f, -r * 0.32f), strokeWidth = 2.2f, cap = StrokeCap.Round)
+            }
+
+            FaceMarkVisualStyle.CURSE_TATTOOS -> {
+                for (side in intArrayOf(-1, 1)) {
+                    drawLine(inkColor, Offset(side * r * 0.58f, -r * 0.24f), Offset(side * r * 0.36f, r * 0.28f), strokeWidth = 2.4f, cap = StrokeCap.Round)
+                    drawCircle(char.auraColor, r * 0.05f, Offset(side * r * 0.38f, r * 0.19f))
+                }
+            }
+
+            FaceMarkVisualStyle.LIGHTNING_BOLTS -> {
+                for (side in intArrayOf(-1, 1)) {
+                    drawLine(char.auraColor, Offset(side * r * 0.46f, r * 0.12f), Offset(side * r * 0.60f, r * 0.22f), strokeWidth = 2.2f)
+                    drawLine(char.auraColor, Offset(side * r * 0.60f, r * 0.22f), Offset(side * r * 0.48f, r * 0.32f), strokeWidth = 2.2f)
+                }
+            }
+
+            FaceMarkVisualStyle.CROSS_SCAR -> {
+                val cx = -r * 0.46f
+                val cy = r * 0.20f
+                drawLine(Color(0xFF991B1B), Offset(cx - r * 0.13f, cy - r * 0.11f), Offset(cx + r * 0.13f, cy + r * 0.11f), strokeWidth = 2.2f, cap = StrokeCap.Round)
+                drawLine(Color(0xFF991B1B), Offset(cx + r * 0.13f, cy - r * 0.11f), Offset(cx - r * 0.13f, cy + r * 0.11f), strokeWidth = 2.2f, cap = StrokeCap.Round)
+            }
+
+            FaceMarkVisualStyle.FANG_JAW -> {
+                drawRoundRect(Color(0xFF09090B), Offset(-r * 0.52f, r * 0.20f), Size(r * 1.04f, r * 0.28f), CornerRadius(6f, 6f))
+                for (t in -2..2) {
+                    drawLine(Color.White, Offset(t * r * 0.17f, r * 0.22f), Offset(t * r * 0.17f, r * 0.45f), strokeWidth = 2.1f)
+                }
+            }
+
+            FaceMarkVisualStyle.SHINOBI_MASK -> {
+                drawRoundRect(Color(0xFF0F172A), Offset(-r * 0.72f, r * 0.16f), Size(r * 1.44f, r * 0.42f), CornerRadius(10f, 10f))
+                drawLine(char.auraColor.copy(alpha = 0.6f), Offset(-r * 0.56f, r * 0.22f), Offset(r * 0.56f, r * 0.22f), strokeWidth = 1.8f)
+            }
+
+            FaceMarkVisualStyle.CYBER_SEAMS -> {
+                drawLine(Color(0xFF64748B), Offset(-r * 0.62f, r * 0.14f), Offset(-r * 0.34f, r * 0.14f), strokeWidth = 1.8f)
+                drawLine(Color(0xFF64748B), Offset(r * 0.34f, r * 0.14f), Offset(r * 0.62f, r * 0.14f), strokeWidth = 1.8f)
+                drawLine(Color(0xFF64748B), Offset(0f, r * 0.12f), Offset(0f, r * 0.36f), strokeWidth = 1.8f)
+            }
+
+            FaceMarkVisualStyle.ROYAL_GEM -> {
+                sharedPath.reset()
+                sharedPath.moveTo(0f, -r * 0.54f)
+                sharedPath.lineTo(r * 0.10f, -r * 0.40f)
+                sharedPath.lineTo(0f, -r * 0.26f)
+                sharedPath.lineTo(-r * 0.10f, -r * 0.40f)
+                sharedPath.close()
+                drawPath(sharedPath, char.auraColor)
+                drawPath(sharedPath, Color.White, style = Stroke(width = 1.4f))
+            }
+
+            FaceMarkVisualStyle.STAR_TEAR -> {
+                drawCircle(char.auraColor, radius = r * 0.065f, center = Offset(r * 0.44f, r * 0.20f))
+                drawLine(char.auraColor, Offset(-r * 0.44f, r * 0.14f), Offset(-r * 0.44f, r * 0.28f), strokeWidth = 2.2f, cap = StrokeCap.Round)
+            }
+
+            FaceMarkVisualStyle.BLOOD_STRIPE -> {
+                drawLine(Color(0xFFDC2626), Offset(-r * 0.52f, r * 0.16f), Offset(r * 0.52f, r * 0.16f), strokeWidth = r * 0.065f, cap = StrokeCap.Round)
+            }
+        }
+    }
+
+    private fun DrawScope.drawSharinganEyes(r: Float) {
+        val ey = -r * 0.03f
+        for (sx in floatArrayOf(-r * 0.32f, r * 0.32f)) {
+            drawOval(Color.White, Offset(sx - r * 0.17f, ey - r * 0.12f), Size(r * 0.34f, r * 0.24f))
+            drawCircle(Color(0xFFDC2626), r * 0.105f, Offset(sx, ey))
+            drawCircle(inkColor, r * 0.038f, Offset(sx, ey))
+            for (t in 0 until 3) {
+                val ta = t * (2f * PI.toFloat() / 3f)
+                drawCircle(inkColor, r * 0.022f, Offset(sx + cos(ta) * r * 0.068f, ey + sin(ta) * r * 0.068f))
+            }
+        }
+        drawAngryBrows(r)
+    }
+
+    private fun DrawScope.drawRinneganEyes(r: Float) {
+        for (sx in floatArrayOf(-r * 0.32f, r * 0.32f)) {
+            drawCircle(Color(0xFFC4B5FD), r * 0.17f, Offset(sx, -r * 0.03f))
+            drawCircle(Color(0xFF4C1D95), r * 0.13f, Offset(sx, -r * 0.03f), style = Stroke(width = 1.8f))
+            drawCircle(Color(0xFF4C1D95), r * 0.08f, Offset(sx, -r * 0.03f), style = Stroke(width = 1.5f))
+            drawCircle(inkColor, r * 0.04f, Offset(sx, -r * 0.03f))
+        }
+        drawAngryBrows(r)
+    }
+
+    private fun DrawScope.drawHypnoticRingEyes(r: Float, baseColor: Color, ringColor: Color) {
+        for (sx in floatArrayOf(-r * 0.32f, r * 0.32f)) {
+            drawCircle(baseColor, r * 0.175f, Offset(sx, -r * 0.02f))
+            drawCircle(ringColor, r * 0.135f, Offset(sx, -r * 0.02f), style = Stroke(width = 2.1f))
+            drawCircle(ringColor, r * 0.07f, Offset(sx, -r * 0.02f), style = Stroke(width = 1.8f))
+        }
+    }
+
+    private fun DrawScope.drawStarShades(r: Float, visorColor: Color) {
+        sharedPath.reset()
+        sharedPath.moveTo(-r * 0.86f, -r * 0.24f)
+        sharedPath.lineTo(0f, -r * 0.04f)
+        sharedPath.lineTo(r * 0.86f, -r * 0.24f)
+        sharedPath.lineTo(r * 0.52f, r * 0.14f)
+        sharedPath.lineTo(0f, 0f)
+        sharedPath.lineTo(-r * 0.52f, r * 0.14f)
+        sharedPath.close()
+        drawPath(sharedPath, visorColor)
+        drawPath(sharedPath, Color.White, style = Stroke(width = 2f, join = StrokeJoin.Round))
+    }
+
+    private fun DrawScope.drawScarredOneEye(r: Float, irisColor: Color) {
+        val lx = -r * 0.32f
+        val rx = r * 0.32f
+        val ey = -r * 0.04f
+        drawOval(Color.White, Offset(lx - r * 0.18f, ey - r * 0.12f), Size(r * 0.36f, r * 0.24f))
+        drawCircle(irisColor, r * 0.09f, Offset(lx, ey))
+        drawCircle(Color.White, r * 0.035f, Offset(lx - r * 0.03f, ey - r * 0.03f))
+        drawLine(inkColor, Offset(rx - r * 0.18f, ey), Offset(rx + r * 0.18f, ey), strokeWidth = 3f, cap = StrokeCap.Round)
+        drawLine(Color(0xFF991B1B), Offset(rx, ey - r * 0.24f), Offset(rx, ey + r * 0.24f), strokeWidth = 2.4f, cap = StrokeCap.Round)
+    }
+
+    private fun DrawScope.drawAngryBrows(r: Float) {
         val eyeY = -r * 0.04f
         val leftX = -r * 0.32f
         val rightX = r * 0.32f
-
-        drawOval(Color.White, Offset(leftX - r * 0.17f, eyeY - r * 0.12f), Size(r * 0.34f, r * 0.23f))
-        drawOval(Color.White, Offset(rightX - r * 0.17f, eyeY - r * 0.12f), Size(r * 0.34f, r * 0.23f))
-
-        drawCircle(irisColor, r * 0.085f, Offset(leftX + r * 0.02f, eyeY))
-        drawCircle(irisColor, r * 0.085f, Offset(rightX - r * 0.02f, eyeY))
-
         drawLine(
             color = inkColor,
             start = Offset(leftX - r * 0.20f, eyeY - r * 0.19f),
@@ -489,5 +629,26 @@ object CharacterFaceDetailRenderer {
             strokeWidth = (r * 0.075f).coerceAtLeast(2.2f),
             cap = StrokeCap.Round
         )
+    }
+
+    private fun DrawScope.drawScowlEyes(r: Float, irisColor: Color) {
+        val eyeY = -r * 0.04f
+        val leftX = -r * 0.32f
+        val rightX = r * 0.32f
+
+        drawOval(Color.White, Offset(leftX - r * 0.17f, eyeY - r * 0.12f), Size(r * 0.34f, r * 0.23f))
+        drawOval(Color.White, Offset(rightX - r * 0.17f, eyeY - r * 0.12f), Size(r * 0.34f, r * 0.23f))
+
+        drawCircle(irisColor, r * 0.09f, Offset(leftX + r * 0.02f, eyeY))
+        drawCircle(irisColor, r * 0.09f, Offset(rightX - r * 0.02f, eyeY))
+
+        drawCircle(inkColor, r * 0.042f, Offset(leftX + r * 0.02f, eyeY))
+        drawCircle(inkColor, r * 0.042f, Offset(rightX - r * 0.02f, eyeY))
+
+        // Crisp anime eye catchlights
+        drawCircle(Color.White, r * 0.032f, Offset(leftX - r * 0.02f, eyeY - r * 0.04f))
+        drawCircle(Color.White, r * 0.032f, Offset(rightX - r * 0.06f, eyeY - r * 0.04f))
+
+        drawAngryBrows(r)
     }
 }

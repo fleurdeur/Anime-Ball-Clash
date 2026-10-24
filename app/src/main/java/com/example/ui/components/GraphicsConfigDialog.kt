@@ -69,6 +69,7 @@ fun GraphicsConfigDialog(
     var selectedRenderMode by remember { mutableStateOf(currentSettings.renderMode) }
     var selectedPhysicsMesh by remember { mutableStateOf(currentSettings.physicsMesh) }
     var selectedFps by remember { mutableStateOf(currentSettings.targetFps) }
+    var sfxEnabled by remember { mutableStateOf(currentSettings.sfxEnabled) }
     var hapticsEnabled by remember { mutableStateOf(currentSettings.hapticsEnabled) }
     var screenShake by remember { mutableStateOf(currentSettings.screenShake) }
     var confirmReset by remember { mutableStateOf(false) }
@@ -140,6 +141,7 @@ fun GraphicsConfigDialog(
                                         renderMode = selectedRenderMode,
                                         physicsMesh = selectedPhysicsMesh,
                                         targetFps = selectedFps,
+                                        sfxEnabled = sfxEnabled,
                                         hapticsEnabled = hapticsEnabled,
                                         screenShake = screenShake
                                     )
@@ -285,6 +287,23 @@ fun GraphicsConfigDialog(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
+                    Text("Combat Sound Effects", style = MaterialTheme.typography.bodyLarge, color = palette.textPrimary)
+                    Switch(
+                        checked = sfxEnabled,
+                        onCheckedChange = { sfxEnabled = it },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = Color.White,
+                            checkedTrackColor = palette.primaryAccent
+                        ),
+                        modifier = Modifier.testTag("sfx_toggle_switch")
+                    )
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     Text("Collision Haptics", style = MaterialTheme.typography.bodyLarge, color = palette.textPrimary)
                     Switch(
                         checked = hapticsEnabled,
@@ -352,7 +371,7 @@ fun GraphicsConfigDialog(
                                 renderMode = selectedRenderMode,
                                 physicsMesh = selectedPhysicsMesh,
                                 targetFps = selectedFps,
-                                sfxEnabled = currentSettings.sfxEnabled,
+                                sfxEnabled = sfxEnabled,
                                 hapticsEnabled = hapticsEnabled,
                                 bloomPostFx = selectedRenderMode == RenderMode.REALISTIC,
                                 screenShake = screenShake

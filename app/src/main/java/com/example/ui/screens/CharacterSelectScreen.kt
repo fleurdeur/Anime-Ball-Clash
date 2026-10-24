@@ -24,10 +24,14 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.Button
@@ -37,6 +41,7 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
@@ -56,6 +61,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.style.TextAlign
@@ -67,19 +73,24 @@ import com.example.model.CharacterAlignment
 import com.example.model.CharacterClass
 import com.example.model.CharacterData
 import com.example.model.CharacterRoster
+import com.example.model.CharacterUpgradeState
 import com.example.model.PlayerProfile
+import com.example.model.UpgradeStatType
 import com.example.ui.components.AnimeBallRenderer
 import com.example.ui.components.HubNavigationBar
 import com.example.ui.theme.AppTheme
+import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CharacterSelectScreen(
     profile: PlayerProfile,
     unlockedIds: Set<String>,
+    characterUpgrades: Map<String, CharacterUpgradeState>,
     claimableQuestCount: Int,
     onSelectCharacter: (String) -> Unit,
     onUnlockCharacter: (CharacterData) -> Boolean,
+    onUpgradeStat: (String, UpgradeStatType) -> Boolean,
     onStartBattle: () -> Unit,
     onNavigate: (AppScreen) -> Unit,
     onBack: () -> Unit
@@ -103,7 +114,8 @@ fun CharacterSelectScreen(
                 val matchesSearch = q.isEmpty() ||
                     char.name.contains(q, ignoreCase = true) ||
                     char.title.contains(q, ignoreCase = true) ||
-                    char.animeInspiration.contains(q, ignoreCase = true)
+                    char.animeInspiration.contains(q, ignoreCase = true) ||
+                    char.passiveName.contains(q, ignoreCase = true)
                 matchesAlignment && matchesTier && matchesRole && matchesSearch
             }
         }
@@ -153,7 +165,7 @@ fun CharacterSelectScreen(
                     }
                     Surface(color = palette.goldAccentSoft, shape = RoundedCornerShape(50)) {
                         Text(
-                            text = "${profile.gold} Gold",
+                            text = "${formatGold(profile.gold)} G",
                             style = MaterialTheme.typography.labelLarge,
                             color = palette.goldAccent,
                             modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
@@ -167,7 +179,7 @@ fun CharacterSelectScreen(
                     value = searchQuery,
                     onValueChange = { searchQuery = it },
                     singleLine = true,
-                    placeholder = { Text("Search hero, villain, or anime series...", color = palette.textMuted) },
+                    placeholder = { Text("Search 220+ heroes, villains, anime, or passives...", color = palette.textMuted) },
                     leadingIcon = {
                         Icon(Icons.Outlined.Search, contentDescription = null, tint = palette.textSecondary)
                     },
@@ -187,7 +199,6 @@ fun CharacterSelectScreen(
 
                 Spacer(modifier = Modifier.height(8.dp))
 
-                // Filter Row: Protagonists vs Antagonists + Popular / Cult / Niche + Combat Roles
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -245,9 +256,11 @@ fun CharacterSelectScreen(
                     items(items = filteredRoster, key = { it.id }) { character ->
                         val isUnlocked = unlockedIds.contains(character.id)
                         val isEquipped = profile.selectedCharacterId == character.id
+                        val upg = characterUpgrades[character.id] ?: CharacterUpgradeState()
 
                         FighterGridTile(
                             character = character,
+                            upgradeTotal = upg.totalUpgrades,
                             isUnlocked = isUnlocked,
                             isEquipped = isEquipped,
                             onClick = {
@@ -270,6 +283,11 @@ fun CharacterSelectScreen(
         val isEquipped = profile.selectedCharacterId == char.id
         val canAfford = profile.gold >= char.unlockCostGold
         val isVillain = char.alignment == CharacterAlignment.ANTAGONIST
+        val upg = characterUpgrades[char.id] ?: CharacterUpgradeState()
+
+        val effHp = upg.effectiveMaxHp(char.maxHp)
+        val effDmg = upg.effectiveBaseDamage(char.baseDamage)
+        val effCd = upg.effectiveUltimateCooldown(char.ultimateCooldownSeconds)
 
         ModalBottomSheet(
             onDismissRequest = { inspectedCharacter = null },
@@ -279,6 +297,7 @@ fun CharacterSelectScreen(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
                     .padding(horizontal = 20.dp, vertical = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
@@ -360,7 +379,7 @@ fun CharacterSelectScreen(
                             )
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                text = if (previewAwakened) "Awakened Form" else "Preview Ultimate Form",
+                                text = if (previewAwakened) "Awakened Model" else "Preview Awakened Model",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = if (previewAwakened) palette.primaryAccent else palette.textPrimary
                             )
@@ -372,17 +391,17 @@ fun CharacterSelectScreen(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    SheetMetric("ROLE", char.classType.displayName, Modifier.weight(1f))
-                    SheetMetric("DAMAGE", "${char.baseDamage}", Modifier.weight(1f))
-                    SheetMetric("SPEED", "${String.format("%.2fx", char.speedRating)}", Modifier.weight(1f))
-                    SheetMetric("ULT CD", "${char.ultimateCooldownSeconds}s", Modifier.weight(1f))
+                    SheetMetric("MAX HP", "$effHp", Modifier.weight(1f))
+                    SheetMetric("POWER", "$effDmg", Modifier.weight(1f))
+                    SheetMetric("SPEED", String.format(Locale.US, "%.2fx", char.speedRating), Modifier.weight(1f))
+                    SheetMetric("ULT CD", String.format(Locale.US, "%.1fs", effCd), Modifier.weight(1f))
                 }
 
                 HorizontalDivider(color = palette.border)
 
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text(
-                        text = "Passive • ${char.passiveName}",
+                        text = "Passive • ${char.passiveName} (${char.passiveArchetype.shortTag})",
                         style = MaterialTheme.typography.titleMedium,
                         color = palette.blueAccent
                     )
@@ -391,11 +410,79 @@ fun CharacterSelectScreen(
 
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text(
-                        text = "Ultimate • ${char.ultimateName} (${char.ultimateDurationSeconds}s • ${char.ultimateCooldownSeconds}s CD)",
+                        text = "Ultimate • ${char.ultimateName} (${char.ultimateDurationSeconds}s • ${String.format(Locale.US, "%.1fs", effCd)} CD)",
                         style = MaterialTheme.typography.titleMedium,
                         color = palette.primaryAccent
                     )
                     Text(char.ultimateDescription, style = MaterialTheme.typography.bodyMedium, color = palette.textSecondary)
+                }
+
+                // --- HIGH-COST CHARACTER UPGRADE FORGE (Health, Power, Lower CD) ---
+                if (isUnlocked) {
+                    Surface(
+                        color = palette.elevatedSurface,
+                        shape = RoundedCornerShape(16.dp),
+                        border = BorderStroke(1.dp, palette.border),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(14.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "Ascension Upgrades",
+                                    style = MaterialTheme.typography.titleLarge,
+                                    color = palette.textPrimary
+                                )
+                                Text(
+                                    text = "${formatGold(profile.gold)} Gold",
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = palette.goldAccent
+                                )
+                            }
+
+                            UpgradeTrackRow(
+                                icon = Icons.Default.Favorite,
+                                accent = palette.greenAccent,
+                                title = "Health (+35 Max HP)",
+                                currentLevel = upg.healthLevel,
+                                statPreview = "$effHp HP",
+                                costGold = upg.nextCostGold(UpgradeStatType.HEALTH),
+                                playerGold = profile.gold,
+                                testTag = "upgrade_health_${char.id}",
+                                onUpgrade = { onUpgradeStat(char.id, UpgradeStatType.HEALTH) }
+                            )
+
+                            UpgradeTrackRow(
+                                icon = Icons.Default.Bolt,
+                                accent = palette.primaryAccent,
+                                title = "Power (+2 DMG & Ult)",
+                                currentLevel = upg.powerLevel,
+                                statPreview = "$effDmg DMG",
+                                costGold = upg.nextCostGold(UpgradeStatType.POWER),
+                                playerGold = profile.gold,
+                                testTag = "upgrade_power_${char.id}",
+                                onUpgrade = { onUpgradeStat(char.id, UpgradeStatType.POWER) }
+                            )
+
+                            UpgradeTrackRow(
+                                icon = Icons.Default.Speed,
+                                accent = palette.blueAccent,
+                                title = "Lower CD (-0.45s CD)",
+                                currentLevel = upg.cooldownLevel,
+                                statPreview = String.format(Locale.US, "%.1fs CD", effCd),
+                                costGold = upg.nextCostGold(UpgradeStatType.COOLDOWN),
+                                playerGold = profile.gold,
+                                testTag = "upgrade_cd_${char.id}",
+                                onUpgrade = { onUpgradeStat(char.id, UpgradeStatType.COOLDOWN) }
+                            )
+                        }
+                    }
                 }
 
                 Text(
@@ -462,9 +549,9 @@ fun CharacterSelectScreen(
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
                             text = if (canAfford) {
-                                "Unlock ${char.name} (${char.unlockCostGold} Gold)"
+                                "Unlock ${char.name} (${formatGold(char.unlockCostGold)} G)"
                             } else {
-                                "Need ${char.unlockCostGold} Gold (Have ${profile.gold})"
+                                "Need ${formatGold(char.unlockCostGold)} G (Have ${formatGold(profile.gold)})"
                             },
                             style = MaterialTheme.typography.titleMedium
                         )
@@ -473,6 +560,74 @@ fun CharacterSelectScreen(
 
                 Spacer(modifier = Modifier.height(16.dp))
             }
+        }
+    }
+}
+
+@Composable
+internal fun UpgradeTrackRow(
+    icon: ImageVector,
+    accent: Color,
+    title: String,
+    currentLevel: Int,
+    statPreview: String,
+    costGold: Int,
+    playerGold: Int,
+    testTag: String,
+    onUpgrade: () -> Unit
+) {
+    val palette = AppTheme.palette
+    val isMaxed = currentLevel >= CharacterUpgradeState.MAX_LEVEL
+    val canAfford = !isMaxed && playerGold >= costGold
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Icon(icon, contentDescription = null, tint = accent, modifier = Modifier.size(20.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(title, style = MaterialTheme.typography.labelLarge, color = palette.textPrimary)
+                Text(
+                    text = "Lv.$currentLevel/${CharacterUpgradeState.MAX_LEVEL} • $statPreview",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = accent
+                )
+            }
+            Spacer(modifier = Modifier.height(4.dp))
+            LinearProgressIndicator(
+                progress = { currentLevel.toFloat() / CharacterUpgradeState.MAX_LEVEL },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(5.dp)
+                    .clip(RoundedCornerShape(50)),
+                color = accent,
+                trackColor = palette.cardSurface
+            )
+        }
+        Button(
+            onClick = onUpgrade,
+            enabled = canAfford,
+            shape = RoundedCornerShape(10.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = palette.goldAccent,
+                contentColor = Color(0xFF14161C),
+                disabledContainerColor = palette.cardSurface,
+                disabledContentColor = palette.textMuted
+            ),
+            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+            modifier = Modifier
+                .height(48.dp)
+                .testTag(testTag)
+        ) {
+            Text(
+                text = if (isMaxed) "MAX" else "${formatGold(costGold)} G",
+                style = MaterialTheme.typography.labelMedium
+            )
         }
     }
 }
@@ -502,6 +657,7 @@ private fun RoleChip(label: String, selected: Boolean, onClick: () -> Unit) {
 @Composable
 private fun FighterGridTile(
     character: CharacterData,
+    upgradeTotal: Int,
     isUnlocked: Boolean,
     isEquipped: Boolean,
     onClick: () -> Unit
@@ -541,6 +697,22 @@ private fun FighterGridTile(
                         character = character,
                         weaponAngle = 0.65f
                     )
+                }
+                if (upgradeTotal > 0) {
+                    Surface(
+                        color = palette.goldAccent,
+                        shape = RoundedCornerShape(50),
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .padding(2.dp)
+                    ) {
+                        Text(
+                            text = "+$upgradeTotal",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = Color(0xFF14161C),
+                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
+                        )
+                    }
                 }
             }
 
@@ -596,7 +768,7 @@ private fun FighterGridTile(
                         ) {
                             Icon(Icons.Default.Lock, contentDescription = null, tint = palette.goldAccent, modifier = Modifier.size(11.dp))
                             Spacer(modifier = Modifier.width(3.dp))
-                            Text("${character.unlockCostGold} G", style = MaterialTheme.typography.labelSmall, color = palette.goldAccent)
+                            Text("${formatGold(character.unlockCostGold)} G", style = MaterialTheme.typography.labelSmall, color = palette.goldAccent)
                         }
                     }
                 }
@@ -623,3 +795,5 @@ private fun SheetMetric(label: String, value: String, modifier: Modifier = Modif
         }
     }
 }
+
+internal fun formatGold(amount: Int): String = String.format(Locale.US, "%,d", amount)

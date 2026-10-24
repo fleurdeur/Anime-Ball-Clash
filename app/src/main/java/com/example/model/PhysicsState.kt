@@ -56,10 +56,11 @@ data class CombatBall(
     var velocity: Vector2,
     var radius: Float = 52f,
     var mass: Float = 1.0f,
-    var currentHp: Float = 100f,
-    var delayedHp: Float = 100f,
-    var maxHp: Float = 100f,
+    var currentHp: Float = -1f,
+    var delayedHp: Float = -1f,
+    var maxHp: Float = -1f,
     var character: CharacterData,
+    var upgrades: CharacterUpgradeState = CharacterUpgradeState(),
     var squashFactor: Float = 1.0f,
     var stretchFactor: Float = 1.0f,
     var deformAngle: Float = 0f,
@@ -74,32 +75,61 @@ data class CombatBall(
     var aiUltReactionTimer: Float = 0f,
     var bleedTicksRemaining: Int = 0,
     var bleedTimer: Float = 0f,
+    var burnTicksRemaining: Int = 0,
+    var burnTimer: Float = 0f,
     var stunTimeRemaining: Float = 0f,
     var slowTimer: Float = 0f,
+    var shieldVisualTimer: Float = 0f,
     var resumeDirection: Vector2 = Vector2(0f, -1f),
     var speedBoostTimer: Float = 0f,
     var speedBoostMultiplier: Float = 1.0f,
     var kamuiBounceStacks: Int = 0,
     var jinwooSpeedStacks: Int = 0,
     var meruemDamageStacks: Int = 0,
+    var hitCounter: Int = 0,
     var totalWallBounces: Int = 0,
     var isShieldActive: Boolean = false,
     var isSeriousActive: Boolean = false,
     var wallBounceCombo: Int = 0,
     val trailPositions: ArrayDeque<Vector2> = ArrayDeque(10)
 ) {
+    init {
+        val computedMax = upgrades.effectiveMaxHp(character.maxHp).toFloat()
+        if (maxHp <= 0f) {
+            maxHp = computedMax
+        }
+        if (currentHp < 0f) {
+            currentHp = maxHp
+        }
+        if (delayedHp < 0f) {
+            delayedHp = currentHp
+        }
+    }
+
     val isDead: Boolean get() = currentHp <= 0f
     val isStunned: Boolean get() = stunTimeRemaining > 0f
     val isUltimateOnCooldown: Boolean get() = ultimateCooldownRemaining > 0f
     val canActivateUltimate: Boolean
         get() = !isUltimateActive && ultimateCooldownRemaining <= 0f && ultimateGauge >= 100f
 
+    val effectiveBaseDamage: Int
+        get() = upgrades.effectiveBaseDamage(character.baseDamage)
+
+    val effectiveUltMultiplier: Float
+        get() = upgrades.effectiveUltimateMultiplier(character.ultimateDamageMultiplier)
+
+    val effectiveUltCooldownSec: Float
+        get() = upgrades.effectiveUltimateCooldown(character.ultimateCooldownSeconds)
+
+    val effectiveRedirectCooldownSec: Float
+        get() = (3.0f - upgrades.redirectCooldownReduction()).coerceAtLeast(1.65f)
+
     fun addUltimate(amount: Float) {
         if (isUltimateActive || ultimateCooldownRemaining > 0f) return
-        val gainMult = when (character.id) {
-            "frieren_zoltraak" -> 1.30f
-            "rimuru_tempest" -> 1.15f
-            "simon_spiral" -> if (currentHp < 60f) 1.25f else 1.05f
+        val gainMult = when {
+            character.passiveArchetype == PassiveArchetype.ARCANE_OVERCHARGE -> 1.28f
+            character.passiveArchetype == PassiveArchetype.ADAPTIVE_EVOLUTION -> 1.14f
+            currentHp < maxHp * 0.45f && character.alignment == CharacterAlignment.PROTAGONIST -> 1.12f
             else -> 1.0f
         }
         ultimateGauge = (ultimateGauge + amount * gainMult).coerceIn(0f, 100f)
@@ -145,7 +175,8 @@ data class FireHazardZone(
     val ownerId: String,
     val x: Float,
     val y: Float,
-    val radius: Float = 50f,
+    val radius: Float = 52f,
     var life: Float = 4.2f,
-    val maxLife: Float = 4.2f
+    val maxLife: Float = 4.2f,
+    val color: Color = Color(0xFFF97316)
 )

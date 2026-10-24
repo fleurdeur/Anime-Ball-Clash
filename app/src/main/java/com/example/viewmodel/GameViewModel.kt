@@ -7,12 +7,14 @@ import android.os.VibrationEffect
 import android.os.Vibrator
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.audio.SoundManager
 import com.example.model.AppScreen
 import com.example.model.AppThemeMode
 import com.example.model.BattleSimulation
 import com.example.model.BotDifficulty
 import com.example.model.CharacterData
 import com.example.model.CharacterRoster
+import com.example.model.CharacterUpgradeState
 import com.example.model.CombatBall
 import com.example.model.EngineSettings
 import com.example.model.GameMode
@@ -25,6 +27,7 @@ import com.example.model.QuestItem
 import com.example.model.RenderMode
 import com.example.model.TargetFPS
 import com.example.model.TurnState
+import com.example.model.UpgradeStatType
 import com.example.model.Vector2
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -34,8 +37,10 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
 data class BattleHudState(
-    val playerHp: Int = 100,
-    val opponentHp: Int = 100,
+    val playerHp: Int = 360,
+    val playerMaxHp: Int = 360,
+    val opponentHp: Int = 360,
+    val opponentMaxHp: Int = 360,
     val playerUltPercent: Int = 0,
     val opponentUltPercent: Int = 0,
     val isPlayerUltActive: Boolean = false,
@@ -59,6 +64,8 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     private val prefs = application.getSharedPreferences("anime_ball_clash_clean_v1", Context.MODE_PRIVATE)
     private val vibrator = application.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
 
+    val soundManager = SoundManager(application)
+
     private val _currentScreen = MutableStateFlow(AppScreen.LOADING)
     val currentScreen: StateFlow<AppScreen> = _currentScreen.asStateFlow()
 
@@ -70,6 +77,9 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _unlockedCharacterIds = MutableStateFlow(loadUnlockedCharacters())
     val unlockedCharacterIds: StateFlow<Set<String>> = _unlockedCharacterIds.asStateFlow()
+
+    private val _characterUpgrades = MutableStateFlow(loadCharacterUpgrades())
+    val characterUpgrades: StateFlow<Map<String, CharacterUpgradeState>> = _characterUpgrades.asStateFlow()
 
     private val _quests = MutableStateFlow(loadQuests())
     val quests: StateFlow<List<QuestItem>> = _quests.asStateFlow()
@@ -115,6 +125,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     private var matchmakingJob: Job? = null
 
     init {
+        soundManager.isEnabled = _engineSettings.value.sfxEnabled
         viewModelScope.launch {
             delay(850)
             if (_currentScreen.value == AppScreen.LOADING) {
@@ -123,26 +134,44 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    override fun onCleared() {
+        soundManager.release()
+        super.onCleared()
+    }
+
     fun navigateTo(screen: AppScreen) {
         if (screen != AppScreen.MATCHMAKING) {
             matchmakingJob?.cancel()
         }
+        soundManager.playUiTap()
         _currentScreen.value = screen
     }
 
     fun setBotDifficulty(difficulty: BotDifficulty) {
         _botDifficulty.value = difficulty
+        soundManager.playUiTap()
     }
 
     fun updateEngineSettings(newSettings: EngineSettings) {
         _engineSettings.value = newSettings
+        soundManager.isEnabled = newSettings.sfxEnabled
         _battleSim.value?.engineSettings = newSettings
         persistEngineSettings(newSettings)
+    }
+
+    fun toggleSfx() {
+        val next = !_engineSettings.value.sfxEnabled
+        val updated = _engineSettings.value.copy(sfxEnabled = next)
+        updateEngineSettings(updated)
+        if (next) {
+            soundManager.playUiTap()
+        }
     }
 
     fun setThemeMode(mode: AppThemeMode) {
         val updated = _engineSettings.value.copy(themeMode = mode)
         updateEngineSettings(updated)
+        soundManager.playUiTap()
         triggerHaptic(14L)
     }
 
@@ -153,6 +182,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
             _playerProfile.value = updated
             _leaderboard.value = InitialGameData.buildLeaderboard(updated)
             prefs.edit().putString("username", trimmed).apply()
+            soundManager.playUiTap()
         }
     }
 
@@ -163,9 +193,61 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         val freshProfile = PlayerProfile()
         _playerProfile.value = freshProfile
         _unlockedCharacterIds.value = CharacterRoster.starterIds
+        _characterUpgrades.value = emptyMap()
         _quests.value = InitialGameData.defaultQuests
         _leaderboard.value = InitialGameData.buildLeaderboard(freshProfile)
         triggerHaptic(35L)
+    }
+
+    fun getUpgradesFor(charId: String): CharacterUpgradeState {
+        return _characterUpgrades.value[charId] ?: CharacterUpgradeState()
+    }
+
+    /**
+     * Upgrades Health (+35 HP), Power (+2 DMG & +0.04x Ult), or Lower CD (-0.45s Ult CD & -0.09s Redirect CD)
+     * with high escalating Gold costs (2,500 G -> 135,000 G per stat).
+     */
+    fun upgradeCharacterStat(charId: String, statType: UpgradeStatType): Boolean {
+        if (!_unlockedCharacterIds.value.contains(charId)) return false
+        val current = getUpgradesFor(charId)
+        if (current.isMaxed(statType)) return false
+
+        val cost = current.nextCostGold(statType)
+        val profile = _playerProfile.value
+        if (profile.gold < cost) return false
+
+        val updatedGold = profile.gold - cost
+        val updatedProfile = profile.copy(gold = updatedGold)
+        _playerProfile.value = updatedProfile
+
+        val updatedUpgrade = when (statType) {
+            UpgradeStatType.HEALTH -> current.copy(healthLevel = current.healthLevel + 1)
+            UpgradeStatType.POWER -> current.copy(powerLevel = current.powerLevel + 1)
+            UpgradeStatType.COOLDOWN -> current.copy(cooldownLevel = current.cooldownLevel + 1)
+        }
+
+        val updatedMap = _characterUpgrades.value.toMutableMap()
+        updatedMap[charId] = updatedUpgrade
+        _characterUpgrades.value = updatedMap
+
+        prefs.edit()
+            .putInt("gold", updatedGold)
+            .putInt("upg_hp_$charId", updatedUpgrade.healthLevel)
+            .putInt("upg_pwr_$charId", updatedUpgrade.powerLevel)
+            .putInt("upg_cd_$charId", updatedUpgrade.cooldownLevel)
+            .apply()
+
+        val updatedQuests = _quests.value.map { q ->
+            if (q.id == "q_upgrade_forge") {
+                q.copy(currentProgress = (q.currentProgress + 1).coerceAtMost(q.targetProgress))
+            } else q
+        }
+        _quests.value = updatedQuests
+        persistQuests(updatedQuests)
+
+        soundManager.playUpgradeForge()
+        triggerHaptic(45L)
+        return true
     }
 
     fun selectCharacter(charId: String) {
@@ -174,6 +256,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         _playerProfile.value = updated
         _leaderboard.value = InitialGameData.buildLeaderboard(updated)
         prefs.edit().putString("selected_char", charId).apply()
+        soundManager.playUiTap()
     }
 
     fun cycleShowcaseCharacter(delta: Int) {
@@ -209,6 +292,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
                 .putString("selected_char", character.id)
                 .putStringSet("unlocked_chars", currentSet)
                 .apply()
+            soundManager.playUpgradeForge()
             triggerHaptic(45L)
             return true
         }
@@ -231,6 +315,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
             )
             _playerProfile.value = updated
             prefs.edit().putInt("gold", updated.gold).putInt("gems", updated.gems).apply()
+            soundManager.playUpgradeForge()
             triggerHaptic(35L)
         }
     }
@@ -238,6 +323,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     fun startMatchmaking(mode: GameMode, difficulty: BotDifficulty = _botDifficulty.value) {
         _selectedMode.value = mode
         _botDifficulty.value = difficulty
+        soundManager.playUiTap()
         _currentScreen.value = AppScreen.MATCHMAKING
 
         val playerChar = CharacterRoster.getById(_playerProfile.value.selectedCharacterId)
@@ -247,7 +333,10 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
 
         _opponentName.value = when (mode) {
             GameMode.PRACTICE_BOT -> "${difficulty.shortLabel} ${oppChar.name}"
-            GameMode.ONLINE_MATCH -> listOf("KuroBlade", "RaidenZero", "SoraVortex", "Akira_JP", "AbyssWalker", "ZenithStrike").random()
+            GameMode.ONLINE_MATCH -> listOf(
+                "KuroBlade", "RaidenZero", "SoraVortex", "Akira_JP",
+                "AbyssWalker", "ZenithStrike", "CrimsonRift", "ValkyrieNine"
+            ).random()
             GameMode.FRIENDS_LOBBY -> "Rival ${oppChar.name}"
         }
 
@@ -273,6 +362,22 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
 
         val playerChar = CharacterRoster.getById(_playerProfile.value.selectedCharacterId)
         val oppChar = _opponentCharacter.value
+        val playerUpg = getUpgradesFor(playerChar.id)
+
+        val aiTierLv = when (_selectedMode.value) {
+            GameMode.ONLINE_MATCH -> (_playerProfile.value.level / 2).coerceIn(1, 5)
+            GameMode.FRIENDS_LOBBY -> 1
+            GameMode.PRACTICE_BOT -> when (_botDifficulty.value) {
+                BotDifficulty.EASY -> 0
+                BotDifficulty.MEDIUM -> 1
+                BotDifficulty.HARD -> 3
+            }
+        }
+        val aiUpg = CharacterUpgradeState(
+            healthLevel = aiTierLv,
+            powerLevel = aiTierLv,
+            cooldownLevel = aiTierLv
+        )
 
         val pBall = CombatBall(
             id = "player",
@@ -280,7 +385,8 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
             position = Vector2(500f, 1100f),
             velocity = Vector2.Zero,
             radius = 52f,
-            character = playerChar
+            character = playerChar,
+            upgrades = playerUpg
         )
 
         val oBall = CombatBall(
@@ -289,7 +395,8 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
             position = Vector2(500f, 340f),
             velocity = Vector2.Zero,
             radius = 52f,
-            character = oppChar
+            character = oppChar,
+            upgrades = aiUpg
         )
 
         val sim = BattleSimulation(
@@ -297,6 +404,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
             opponentBall = oBall,
             engineSettings = _engineSettings.value,
             onCollisionImpact = { isPlayerAttacker, damage, isCrit, passiveLabel ->
+                soundManager.playBallClash(isCrit)
                 triggerHaptic(if (isCrit) 55L else 25L)
                 if (isPlayerAttacker) {
                     damageDealtInMatch += damage
@@ -306,6 +414,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
                 latestBannerText = "$passiveLabel • -$damage HP"
             },
             onWallBounce = { ball ->
+                soundManager.playWallBounce(ball.wallBounceCombo)
                 wallBouncesInMatch++
                 if (ball.wallBounceCombo > maxComboInMatch) {
                     maxComboInMatch = ball.wallBounceCombo
@@ -313,15 +422,27 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
             },
             onKnockout = { isPlayerWinner ->
                 _turnState.value = TurnState.KNOCKOUT_SLOWMO
+                soundManager.playKnockout()
                 triggerHaptic(140L)
                 handleMatchEnd(isPlayerWinner)
             },
             onUltimateActivated = { isPlayer, ultName ->
+                soundManager.playAwakening(isPlayer)
                 triggerHaptic(80L)
                 latestBannerText = if (isPlayer) {
                     "YOU AWAKENED • $ultName!"
                 } else {
                     "AI AWAKENED • $ultName!"
+                }
+            },
+            onPassiveTriggered = { isPlayer, passiveName ->
+                soundManager.playPassiveTrigger()
+                val who = if (isPlayer) "YOUR" else "RIVAL"
+                latestBannerText = "$who PASSIVE • $passiveName"
+            },
+            onRedirectUsed = { isPlayer ->
+                if (isPlayer) {
+                    soundManager.playRedirectDash()
                 }
             }
         )
@@ -356,6 +477,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
             TurnState.AIM_OPENING -> {
                 sim.startNonstopClash(launchDir, _botDifficulty.value)
                 _turnState.value = TurnState.NONSTOP_CLASH
+                soundManager.playRedirectDash()
                 triggerHaptic(30L)
                 syncHudState(sim, force = true)
             }
@@ -375,6 +497,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         val toEnemy = (sim.opponentBall.position - sim.playerBall.position).rotate(0.28f).normalized()
         sim.startNonstopClash(toEnemy, _botDifficulty.value)
         _turnState.value = TurnState.NONSTOP_CLASH
+        soundManager.playRedirectDash()
         triggerHaptic(30L)
         syncHudState(sim, force = true)
     }
@@ -404,7 +527,9 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
 
         val candidate = BattleHudState(
             playerHp = p.currentHp.toInt().coerceAtLeast(0),
+            playerMaxHp = p.maxHp.toInt().coerceAtLeast(1),
             opponentHp = o.currentHp.toInt().coerceAtLeast(0),
+            opponentMaxHp = o.maxHp.toInt().coerceAtLeast(1),
             playerUltPercent = pUltInt,
             opponentUltPercent = oUltInt,
             isPlayerUltActive = p.isUltimateActive,
@@ -415,8 +540,8 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
             opponentUltCooldownHalfSecs = oCdHalf,
             playerUltMaxDurationSec = p.character.ultimateDurationSeconds,
             opponentUltMaxDurationSec = o.character.ultimateDurationSeconds,
-            playerUltMaxCooldownSec = p.character.ultimateCooldownSeconds,
-            opponentUltMaxCooldownSec = o.character.ultimateCooldownSeconds,
+            playerUltMaxCooldownSec = p.effectiveUltCooldownSec,
+            opponentUltMaxCooldownSec = o.effectiveUltCooldownSec,
             redirectReady = sim.playerRedirectCooldown <= 0.05f,
             redirectHalfSecsLeft = redirectHalfSecs,
             lastImpactBanner = latestBannerText
@@ -430,9 +555,21 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     private fun handleMatchEnd(isPlayerWinner: Boolean) {
         val sim = _battleSim.value ?: return
 
-        val goldEarned = if (isPlayerWinner) 220 else 80
-        val gemsEarned = if (isPlayerWinner) 15 else 5
-        val expEarned = if (isPlayerWinner) 120 else 45
+        val diffBonus = when (_botDifficulty.value) {
+            BotDifficulty.EASY -> 0
+            BotDifficulty.MEDIUM -> 280
+            BotDifficulty.HARD -> 650
+        }
+        val modeBonus = if (_selectedMode.value == GameMode.ONLINE_MATCH) 350 else 0
+        val comboBonus = (maxComboInMatch * 35).coerceAtMost(350)
+
+        val goldEarned = if (isPlayerWinner) {
+            950 + diffBonus + modeBonus + comboBonus
+        } else {
+            320 + (comboBonus / 2)
+        }
+        val gemsEarned = if (isPlayerWinner) 25 else 8
+        val expEarned = if (isPlayerWinner) 150 else 55
         val elapsedSec = ((System.currentTimeMillis() - matchStartMillis) / 1000L).toInt().coerceAtLeast(1)
 
         val stats = MatchStatistics(
@@ -460,7 +597,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
                 "q_first_match" -> q.copy(currentProgress = (q.currentProgress + 1).coerceAtMost(q.targetProgress))
                 "q_wall_ricochet" -> q.copy(currentProgress = (q.currentProgress + wallBouncesInMatch).coerceAtMost(q.targetProgress))
                 "q_awakenings" -> q.copy(currentProgress = (q.currentProgress + ultimatesUsedInMatch).coerceAtMost(q.targetProgress))
-                "q_clean_victory" -> if (isPlayerWinner && stats.playerFinalHp >= 40) q.copy(currentProgress = 1) else q
+                "q_clean_victory" -> if (isPlayerWinner && stats.playerFinalHp >= 120) q.copy(currentProgress = 1) else q
                 "q_three_wins" -> if (isPlayerWinner) q.copy(currentProgress = (q.currentProgress + 1).coerceAtMost(q.targetProgress)) else q
                 else -> q
             }
@@ -572,6 +709,23 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         return if (filtered.isEmpty()) CharacterRoster.starterIds else (filtered + CharacterRoster.starterIds)
     }
 
+    private fun loadCharacterUpgrades(): Map<String, CharacterUpgradeState> {
+        val result = HashMap<String, CharacterUpgradeState>()
+        for (char in CharacterRoster.characters) {
+            val hp = prefs.getInt("upg_hp_${char.id}", 0).coerceIn(0, CharacterUpgradeState.MAX_LEVEL)
+            val pwr = prefs.getInt("upg_pwr_${char.id}", 0).coerceIn(0, CharacterUpgradeState.MAX_LEVEL)
+            val cd = prefs.getInt("upg_cd_${char.id}", 0).coerceIn(0, CharacterUpgradeState.MAX_LEVEL)
+            if (hp > 0 || pwr > 0 || cd > 0) {
+                result[char.id] = CharacterUpgradeState(
+                    healthLevel = hp,
+                    powerLevel = pwr,
+                    cooldownLevel = cd
+                )
+            }
+        }
+        return result
+    }
+
     private fun loadQuests(): List<QuestItem> {
         return InitialGameData.defaultQuests.map { seed ->
             val prog = prefs.getInt("quest_prog_${seed.id}", 0)
@@ -594,6 +748,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         val renderStr = prefs.getString("render_mode", RenderMode.BALANCED.name) ?: RenderMode.BALANCED.name
         val meshStr = prefs.getString("physics_mesh", PhysicsMesh.DYNAMIC.name) ?: PhysicsMesh.DYNAMIC.name
         val fpsStr = prefs.getString("target_fps", TargetFPS.FPS_60.name) ?: TargetFPS.FPS_60.name
+        val sfx = prefs.getBoolean("sfx_enabled", true)
         val haptics = prefs.getBoolean("haptics_enabled", true)
         val shake = prefs.getBoolean("screen_shake", true)
 
@@ -607,6 +762,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
             renderMode = render,
             physicsMesh = mesh,
             targetFps = fps,
+            sfxEnabled = sfx,
             hapticsEnabled = haptics,
             bloomPostFx = render == RenderMode.REALISTIC,
             screenShake = shake
@@ -619,6 +775,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
             .putString("render_mode", settings.renderMode.name)
             .putString("physics_mesh", settings.physicsMesh.name)
             .putString("target_fps", settings.targetFps.name)
+            .putBoolean("sfx_enabled", settings.sfxEnabled)
             .putBoolean("haptics_enabled", settings.hapticsEnabled)
             .putBoolean("screen_shake", settings.screenShake)
             .apply()
