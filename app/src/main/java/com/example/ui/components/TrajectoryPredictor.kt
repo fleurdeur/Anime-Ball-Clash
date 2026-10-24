@@ -18,12 +18,13 @@ object TrajectoryPredictor {
         scope: DrawScope,
         ballPosition: Vector2,
         ballRadius: Float,
-        globalTime: Float
+        globalTime: Float,
+        reticleColor: Color = Color(0xFFF8FAFC)
     ) {
         with(scope) {
             val pulse = 1.38f + sin(globalTime * 5f) * 0.06f
             drawCircle(
-                color = Color(0xFFF8FAFC).copy(alpha = 0.50f),
+                color = reticleColor.copy(alpha = 0.52f),
                 radius = ballRadius * pulse,
                 center = Offset(ballPosition.x, ballPosition.y),
                 style = Stroke(width = 2.5f, pathEffect = dashEffect)
@@ -41,7 +42,8 @@ object TrajectoryPredictor {
         wallTop: Float,
         wallBottom: Float,
         ballRadius: Float,
-        isRedirectAim: Boolean = false
+        isRedirectAim: Boolean = false,
+        reticleColor: Color = Color(0xFFF8FAFC)
     ) {
         with(scope) {
             val dragLen = dragVector.length()
@@ -50,7 +52,10 @@ object TrajectoryPredictor {
             val launchDir = Vector2(-dragVector.x, -dragVector.y).normalized()
             val powerRatio = min(dragLen / maxPullPx.coerceAtLeast(100f), 1.0f)
 
-            val aimColor = if (isRedirectAim) Color(0xFF38BDF8) else Color(0xFFFACC15)
+            val aimColor = if (isRedirectAim) Color(0xFF0284C7) else Color(0xFFEA580C)
+            val brightAim = if (isRedirectAim) Color(0xFF38BDF8) else Color(0xFFFACC15)
+            val activeAim = if (reticleColor.red > 0.5f) brightAim else aimColor
+
             val ballCenter = Offset(ballPosition.x, ballPosition.y)
             val pullEnd = Offset(
                 ballPosition.x + (dragVector.normalized().x * min(dragLen, maxPullPx)),
@@ -58,13 +63,13 @@ object TrajectoryPredictor {
             )
 
             drawLine(
-                color = Color.White.copy(alpha = 0.38f),
+                color = reticleColor.copy(alpha = 0.42f),
                 start = ballCenter,
                 end = pullEnd,
                 strokeWidth = 3.5f,
                 cap = StrokeCap.Round
             )
-            drawCircle(color = aimColor, radius = 7f, center = pullEnd)
+            drawCircle(color = activeAim, radius = 7f, center = pullEnd)
 
             val totalRayDist = (wallRight - wallLeft) * (0.75f + powerRatio * 1.15f)
             traceRayBounces(
@@ -76,7 +81,8 @@ object TrajectoryPredictor {
                 wallTop = wallTop,
                 wallBottom = wallBottom,
                 maxBounces = if (isRedirectAim) 1 else 2,
-                primaryColor = aimColor
+                primaryColor = activeAim,
+                nodeColor = reticleColor
             )
         }
     }
@@ -90,7 +96,8 @@ object TrajectoryPredictor {
         wallTop: Float,
         wallBottom: Float,
         maxBounces: Int,
-        primaryColor: Color
+        primaryColor: Color,
+        nodeColor: Color
     ) {
         var currPos = origin
         var currDir = initialDir
@@ -130,7 +137,7 @@ object TrajectoryPredictor {
                 }
             }
 
-            val segAlpha = (0.88f - bounce * 0.28f).coerceAtLeast(0.25f)
+            val segAlpha = (0.88f - bounce * 0.28f).coerceAtLeast(0.28f)
             val strokeW = (4.5f - bounce * 1.1f).coerceAtLeast(2.2f)
 
             if (tMin < rem && bounce < maxBounces) {
@@ -143,7 +150,7 @@ object TrajectoryPredictor {
                     cap = StrokeCap.Round,
                     pathEffect = dashEffect
                 )
-                drawCircle(color = Color.White, radius = 5f, center = Offset(hit.x, hit.y))
+                drawCircle(color = nodeColor, radius = 5f, center = Offset(hit.x, hit.y))
                 rem -= tMin
                 currPos = hit
                 currDir = (currDir - (normal * (2f * currDir.dot(normal)))).normalized()

@@ -17,11 +17,17 @@ import com.example.model.PhysicsMesh
 import com.example.model.PlayerProfile
 import com.example.model.RenderMode
 import com.example.model.TargetFPS
+import com.example.model.AbilityVfxStyle
+import com.example.model.GameMode
 import com.example.model.UltimateArchetype
 import com.example.model.UpgradeStatType
 import com.example.model.Vector2
+import com.example.network.OnlineArenaRepository
+import com.example.ui.theme.DarkAppPalette
+import com.example.ui.theme.LightAppPalette
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -388,5 +394,156 @@ class ExampleUnitTest {
         val lightSettings = settings.copy(themeMode = AppThemeMode.LIGHT, sfxEnabled = false)
         assertEquals(AppThemeMode.LIGHT, lightSettings.themeMode)
         assertFalse(lightSettings.sfxEnabled)
+
+        assertTrue(DarkAppPalette.isDark)
+        assertFalse(LightAppPalette.isDark)
+        assertNotEquals(DarkAppPalette.background, LightAppPalette.background)
+        assertNotEquals(DarkAppPalette.stageSurface, LightAppPalette.stageSurface)
+        assertNotEquals(DarkAppPalette.damageTextDefault, LightAppPalette.damageTextDefault)
+    }
+
+    @Test
+    fun testGutsUltimateGrowsDragonSlayerAndTriggersSpecialEffects() {
+        val guts = CharacterRoster.getById("guts_berserk")
+        val rival = CharacterRoster.getById("griffith_hawk")
+
+        val gutsBall = CombatBall(
+            id = "player",
+            name = guts.name,
+            position = Vector2(460f, 800f),
+            velocity = Vector2(520f, -420f),
+            character = guts
+        )
+        val rivalBall = CombatBall(
+            id = "opponent",
+            name = rival.name,
+            position = Vector2(600f, 500f),
+            velocity = Vector2(-420f, 480f),
+            character = rival
+        )
+
+        assertEquals(1.0f, gutsBall.weaponScale, 0.01f)
+        assertEquals(1.0f, gutsBall.targetWeaponScale, 0.01f)
+
+        val sim = BattleSimulation(
+            playerBall = gutsBall,
+            opponentBall = rivalBall,
+            engineSettings = EngineSettings(renderMode = RenderMode.ULTRA),
+            onCollisionImpact = { _, _, _, _ -> },
+            onWallBounce = {},
+            onKnockout = {}
+        )
+        sim.configureArenaBounds(1000f, 1600f)
+        sim.isRoundActive = true
+        sim.isClashStarted = true
+
+        gutsBall.ultimateGauge = 100f
+        assertTrue(sim.triggerUltimate(gutsBall))
+        assertTrue(gutsBall.isUltimateActive)
+        assertEquals(1.92f, gutsBall.targetWeaponScale, 0.01f)
+        assertEquals(1.92f, gutsBall.weaponScale, 0.01f)
+        assertTrue(
+            "Activating Guts' Ultimate should spawn bespoke SLASH_CROSS VFX rings",
+            sim.shockwaves.any { it.style == AbilityVfxStyle.SLASH_CROSS }
+        )
+    }
+
+    @Test
+    fun testRenderModeOptimizationBudgetsScaleCleanly() {
+        assertEquals("Low", RenderMode.PIXELIZED.title)
+        assertEquals("Medium", RenderMode.BALANCED.title)
+        assertEquals("High", RenderMode.REALISTIC.title)
+        assertEquals("Ultra", RenderMode.ULTRA.title)
+
+        assertEquals(0, RenderMode.PIXELIZED.maxTrailNodes)
+        assertFalse(RenderMode.PIXELIZED.ambientAuraFx)
+        assertFalse(RenderMode.PIXELIZED.bloomGlow)
+
+        assertTrue(RenderMode.BALANCED.maxParticles < RenderMode.REALISTIC.maxParticles)
+        assertTrue(RenderMode.REALISTIC.maxParticles < RenderMode.ULTRA.maxParticles)
+        assertTrue(RenderMode.ULTRA.bloomGlow)
+    }
+
+    @Test
+    fun testGameModesExcludeFreePlayAndSupportCustomMultiplayerAndOnlineRanked() {
+        val modeNames = GameMode.entries.map { it.name }.toSet()
+        assertFalse("Free Play (FRIENDS_LOBBY) must be removed", modeNames.contains("FRIENDS_LOBBY"))
+        assertFalse("No GameMode title may be Free Play", GameMode.entries.any { it.title.equals("Free Play", ignoreCase = true) })
+        assertTrue(modeNames.contains("PRACTICE_BOT"))
+        assertTrue(modeNames.contains("CUSTOM_MATCH"))
+        assertTrue(modeNames.contains("MULTIPLAYER"))
+        assertTrue(modeNames.contains("ONLINE_MATCH"))
+    }
+
+    @Test
+    fun testNormalIsHardAndHardIsExtremeAiDifficulty() {
+        assertEquals("Hard", BotDifficulty.MEDIUM.shortLabel)
+        assertEquals("Extreme", BotDifficulty.HARD.shortLabel)
+
+        assertTrue(BotDifficulty.MEDIUM.aimAccuracy >= 0.94f)
+        assertTrue(BotDifficulty.HARD.aimAccuracy >= 0.99f)
+        assertTrue(BotDifficulty.MEDIUM.speedFactor >= 1.14f)
+        assertTrue(BotDifficulty.HARD.speedFactor >= 1.28f)
+        assertTrue(BotDifficulty.HARD.redirectCooldownSec < BotDifficulty.MEDIUM.redirectCooldownSec)
+        assertTrue(BotDifficulty.MEDIUM.redirectCooldownSec < BotDifficulty.EASY.redirectCooldownSec)
+    }
+
+    @Test
+    fun testRemoteMultiplayerCommandMirroringAndCloudUpgradePacking() {
+        val pBall = CombatBall(
+            id = "player",
+            name = "Host",
+            position = Vector2(500f, 1100f),
+            velocity = Vector2.Zero,
+            character = CharacterRoster.getById("kakarot_z")
+        )
+        val oBall = CombatBall(
+            id = "opponent",
+            name = "Friend",
+            position = Vector2(500f, 350f),
+            velocity = Vector2.Zero,
+            character = CharacterRoster.getById("satoru_void")
+        )
+        val sim = BattleSimulation(
+            playerBall = pBall,
+            opponentBall = oBall,
+            engineSettings = EngineSettings(),
+            isRemoteMultiplayer = true,
+            onCollisionImpact = { _, _, _, _ -> },
+            onWallBounce = {},
+            onKnockout = {}
+        )
+        sim.configureArenaBounds(1000f, 1600f)
+        sim.applyRemoteOpponentCommand(Vector2(0.35f, 0.93f), isOpening = true)
+        assertTrue(sim.isClashStarted)
+        assertTrue(sim.opponentBall.velocity.length() > 300f)
+
+        sim.applyMirroredLanSync(
+            localNormX = 0.52f,
+            localNormY = 0.72f,
+            localNormVx = 0.30f,
+            localNormVy = -0.80f,
+            remoteNormX = 0.48f,
+            remoteNormY = 0.28f,
+            remoteNormVx = -0.30f,
+            remoteNormVy = 0.80f,
+            localHp = 310f,
+            remoteHp = 295f,
+            localUlt = 44f,
+            remoteUlt = 58f
+        )
+        assertEquals(310f, sim.playerBall.currentHp, 0.1f)
+        assertEquals(295f, sim.opponentBall.currentHp, 0.1f)
+
+        val code = OnlineArenaRepository.generateRoomCode()
+        assertEquals(6, code.length)
+
+        val originalUpgrades = mapOf(
+            "guts_berserk" to CharacterUpgradeState(healthLevel = 4, powerLevel = 7, cooldownLevel = 3),
+            "kakarot_z" to CharacterUpgradeState(healthLevel = 2, powerLevel = 2, cooldownLevel = 5)
+        )
+        val packed = OnlineArenaRepository.packUpgrades(originalUpgrades)
+        val unpacked = OnlineArenaRepository.unpackUpgrades(packed)
+        assertEquals(originalUpgrades, unpacked)
     }
 }

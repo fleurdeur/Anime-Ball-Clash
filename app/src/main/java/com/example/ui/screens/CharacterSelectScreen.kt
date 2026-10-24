@@ -179,7 +179,7 @@ fun CharacterSelectScreen(
                     value = searchQuery,
                     onValueChange = { searchQuery = it },
                     singleLine = true,
-                    placeholder = { Text("Search 220+ heroes, villains, anime, or passives...", color = palette.textMuted) },
+                    placeholder = { Text("Search fighters or anime...", color = palette.textMuted) },
                     leadingIcon = {
                         Icon(Icons.Outlined.Search, contentDescription = null, tint = palette.textSecondary)
                     },
@@ -215,14 +215,14 @@ fun CharacterSelectScreen(
                         }
                     )
                     RoleChip(
-                        label = "Protagonists",
+                        label = "Heroes",
                         selected = selectedAlignment == CharacterAlignment.PROTAGONIST,
                         onClick = {
                             selectedAlignment = if (selectedAlignment == CharacterAlignment.PROTAGONIST) null else CharacterAlignment.PROTAGONIST
                         }
                     )
                     RoleChip(
-                        label = "Antagonists",
+                        label = "Villains",
                         selected = selectedAlignment == CharacterAlignment.ANTAGONIST,
                         onClick = {
                             selectedAlignment = if (selectedAlignment == CharacterAlignment.ANTAGONIST) null else CharacterAlignment.ANTAGONIST
@@ -253,7 +253,11 @@ fun CharacterSelectScreen(
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                     modifier = Modifier.weight(1f)
                 ) {
-                    items(items = filteredRoster, key = { it.id }) { character ->
+                    items(
+                        items = filteredRoster,
+                        key = { it.id },
+                        contentType = { "fighter_tile" }
+                    ) { character ->
                         val isUnlocked = unlockedIds.contains(character.id)
                         val isEquipped = profile.selectedCharacterId == character.id
                         val upg = characterUpgrades[character.id] ?: CharacterUpgradeState()
@@ -379,7 +383,7 @@ fun CharacterSelectScreen(
                             )
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                text = if (previewAwakened) "Awakened Model" else "Preview Awakened Model",
+                                text = if (previewAwakened) "Ultimate ON" else "Show Ultimate",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = if (previewAwakened) palette.primaryAccent else palette.textPrimary
                             )
@@ -391,10 +395,10 @@ fun CharacterSelectScreen(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    SheetMetric("MAX HP", "$effHp", Modifier.weight(1f))
+                    SheetMetric("HP", "$effHp", Modifier.weight(1f))
                     SheetMetric("POWER", "$effDmg", Modifier.weight(1f))
                     SheetMetric("SPEED", String.format(Locale.US, "%.2fx", char.speedRating), Modifier.weight(1f))
-                    SheetMetric("ULT CD", String.format(Locale.US, "%.1fs", effCd), Modifier.weight(1f))
+                    SheetMetric("ULT WAIT", String.format(Locale.US, "%.1fs", effCd), Modifier.weight(1f))
                 }
 
                 HorizontalDivider(color = palette.border)
@@ -410,14 +414,13 @@ fun CharacterSelectScreen(
 
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text(
-                        text = "Ultimate • ${char.ultimateName} (${char.ultimateDurationSeconds}s • ${String.format(Locale.US, "%.1fs", effCd)} CD)",
+                        text = "Ultimate • ${char.ultimateName} (${char.ultimateDurationSeconds}s • ${String.format(Locale.US, "%.1fs", effCd)} wait)",
                         style = MaterialTheme.typography.titleMedium,
                         color = palette.primaryAccent
                     )
                     Text(char.ultimateDescription, style = MaterialTheme.typography.bodyMedium, color = palette.textSecondary)
                 }
 
-                // --- HIGH-COST CHARACTER UPGRADE FORGE (Health, Power, Lower CD) ---
                 if (isUnlocked) {
                     Surface(
                         color = palette.elevatedSurface,
@@ -435,12 +438,12 @@ fun CharacterSelectScreen(
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Text(
-                                    text = "Ascension Upgrades",
+                                    text = "Upgrades",
                                     style = MaterialTheme.typography.titleLarge,
                                     color = palette.textPrimary
                                 )
                                 Text(
-                                    text = "${formatGold(profile.gold)} Gold",
+                                    text = "${formatGold(profile.gold)} G",
                                     style = MaterialTheme.typography.labelLarge,
                                     color = palette.goldAccent
                                 )
@@ -449,7 +452,7 @@ fun CharacterSelectScreen(
                             UpgradeTrackRow(
                                 icon = Icons.Default.Favorite,
                                 accent = palette.greenAccent,
-                                title = "Health (+35 Max HP)",
+                                title = "Health (+35 HP)",
                                 currentLevel = upg.healthLevel,
                                 statPreview = "$effHp HP",
                                 costGold = upg.nextCostGold(UpgradeStatType.HEALTH),
@@ -461,7 +464,7 @@ fun CharacterSelectScreen(
                             UpgradeTrackRow(
                                 icon = Icons.Default.Bolt,
                                 accent = palette.primaryAccent,
-                                title = "Power (+2 DMG & Ult)",
+                                title = "Power (+2 DMG)",
                                 currentLevel = upg.powerLevel,
                                 statPreview = "$effDmg DMG",
                                 costGold = upg.nextCostGold(UpgradeStatType.POWER),
@@ -473,9 +476,9 @@ fun CharacterSelectScreen(
                             UpgradeTrackRow(
                                 icon = Icons.Default.Speed,
                                 accent = palette.blueAccent,
-                                title = "Lower CD (-0.45s CD)",
+                                title = "Faster Ult (-0.45s)",
                                 currentLevel = upg.cooldownLevel,
-                                statPreview = String.format(Locale.US, "%.1fs CD", effCd),
+                                statPreview = String.format(Locale.US, "%.1fs", effCd),
                                 costGold = upg.nextCostGold(UpgradeStatType.COOLDOWN),
                                 playerGold = profile.gold,
                                 testTag = "upgrade_cd_${char.id}",
@@ -492,6 +495,8 @@ fun CharacterSelectScreen(
                     color = palette.textMuted
                 )
 
+                val onGold = if (palette.isDark) Color(0xFF14161C) else Color.White
+
                 if (isUnlocked) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -506,7 +511,7 @@ fun CharacterSelectScreen(
                                     .weight(1f)
                                     .height(52.dp)
                             ) {
-                                Text("Equip", style = MaterialTheme.typography.labelLarge, color = palette.textPrimary)
+                                Text("Use", style = MaterialTheme.typography.labelLarge, color = palette.textPrimary)
                             }
                         }
                         Button(
@@ -524,7 +529,7 @@ fun CharacterSelectScreen(
                         ) {
                             Icon(Icons.Default.PlayArrow, contentDescription = null)
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text("Battle with ${char.name}", style = MaterialTheme.typography.titleMedium, color = Color.White)
+                            Text("Play with ${char.name}", style = MaterialTheme.typography.titleMedium, color = Color.White)
                         }
                     }
                 } else {
@@ -536,7 +541,7 @@ fun CharacterSelectScreen(
                         shape = RoundedCornerShape(14.dp),
                         colors = ButtonDefaults.buttonColors(
                             containerColor = palette.goldAccent,
-                            contentColor = Color(0xFF14161C),
+                            contentColor = onGold,
                             disabledContainerColor = palette.elevatedSurface,
                             disabledContentColor = palette.textMuted
                         ),
@@ -549,7 +554,7 @@ fun CharacterSelectScreen(
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
                             text = if (canAfford) {
-                                "Unlock ${char.name} (${formatGold(char.unlockCostGold)} G)"
+                                "Buy ${char.name} (${formatGold(char.unlockCostGold)} G)"
                             } else {
                                 "Need ${formatGold(char.unlockCostGold)} G (Have ${formatGold(profile.gold)})"
                             },
@@ -615,7 +620,7 @@ internal fun UpgradeTrackRow(
             shape = RoundedCornerShape(10.dp),
             colors = ButtonDefaults.buttonColors(
                 containerColor = palette.goldAccent,
-                contentColor = Color(0xFF14161C),
+                contentColor = if (palette.isDark) Color(0xFF14161C) else Color.White,
                 disabledContainerColor = palette.cardSurface,
                 disabledContentColor = palette.textMuted
             ),
@@ -709,7 +714,7 @@ private fun FighterGridTile(
                         Text(
                             text = "+$upgradeTotal",
                             style = MaterialTheme.typography.labelSmall,
-                            color = Color(0xFF14161C),
+                            color = if (palette.isDark) Color(0xFF14161C) else Color.White,
                             modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
                         )
                     }

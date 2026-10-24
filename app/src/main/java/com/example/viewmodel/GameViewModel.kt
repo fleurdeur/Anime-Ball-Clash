@@ -5,6 +5,7 @@ import android.content.Context
 import android.os.Build
 import android.os.VibrationEffect
 import android.os.Vibrator
+import android.os.VibratorManager
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.audio.SoundManager
@@ -29,12 +30,23 @@ import com.example.model.TargetFPS
 import com.example.model.TurnState
 import com.example.model.UpgradeStatType
 import com.example.model.Vector2
+import com.example.network.LanDiscoveredHost
+import com.example.network.LanMultiplayerManager
+import com.example.network.LanPacket
+import com.example.network.LanPeerInfo
+import com.example.network.LanSessionState
+import com.example.network.MatchRoomDoc
+import com.example.network.OnlineArenaRepository
+import com.example.network.RankedQueueResult
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.launch
+import kotlin.math.max
 
 data class BattleHudState(
     val playerHp: Int = 360,
@@ -58,13 +70,28 @@ data class BattleHudState(
     val lastImpactBanner: String = ""
 )
 
+private enum class ActiveTransport {
+    NONE,
+    LAN,
+    FIRESTORE
+}
+
 class GameViewModel(application: Application) : AndroidViewModel(application) {
 
-    // Fresh clean-account preferences key: starts strictly at 0 progress on first install
     private val prefs = application.getSharedPreferences("anime_ball_clash_clean_v1", Context.MODE_PRIVATE)
-    private val vibrator = application.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+    private val vibrator: Vibrator? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        (application.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? VibratorManager)?.defaultVibrator
+    } else {
+        @Suppress("DEPRECATION")
+        application.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+    }
 
     val soundManager = SoundManager(application)
+    private val lanManager = LanMultiplayerManager(application)
+
+    private var onlineRepository: OnlineArenaRepository? = null
+    private var boundUserId: String? = null
+    private var cachedOnlineLeaderboard: List<LeaderboardEntry> = emptyList()
 
     private val _currentScreen = MutableStateFlow(AppScreen.LOADING)
     val currentScreen: StateFlow<AppScreen> = _currentScreen.asStateFlow()
@@ -93,14 +120,35 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     private val _botDifficulty = MutableStateFlow(BotDifficulty.MEDIUM)
     val botDifficulty: StateFlow<BotDifficulty> = _botDifficulty.asStateFlow()
 
+    private val _customOpponentCharacter = MutableStateFlow(CharacterRoster.getById("guts_berserk"))
+    val customOpponentCharacter: StateFlow<CharacterData> = _customOpponentCharacter.asStateFlow()
+
     private val _matchmakingCountdown = MutableStateFlow(2)
     val matchmakingCountdown: StateFlow<Int> = _matchmakingCountdown.asStateFlow()
+
+    private val _canStartRankedChallenger = MutableStateFlow(false)
+    val canStartRankedChallenger: StateFlow<Boolean> = _canStartRankedChallenger.asStateFlow()
 
     private val _opponentName = MutableStateFlow("Rival Sukuna")
     val opponentName: StateFlow<String> = _opponentName.asStateFlow()
 
     private val _opponentCharacter = MutableStateFlow(CharacterRoster.getById("sukuna_shrine"))
     val opponentCharacter: StateFlow<CharacterData> = _opponentCharacter.asStateFlow()
+
+    private val _localIpAddress = MutableStateFlow(lanManager.detectLocalIpv4())
+    val localIpAddress: StateFlow<String> = _localIpAddress.asStateFlow()
+
+    val lanSessionState: StateFlow<LanSessionState> = lanManager.sessionState
+    val discoveredLanHosts: StateFlow<List<LanDiscoveredHost>> = lanManager.discoveredHosts
+
+    private val _activeRoomCode = MutableStateFlow<String?>(null)
+    val activeRoomCode: StateFlow<String?> = _activeRoomCode.asStateFlow()
+
+    private val _isOnlineRoomBusy = MutableStateFlow(false)
+    val isOnlineRoomBusy: StateFlow<Boolean> = _isOnlineRoomBusy.asStateFlow()
+
+    private val _lobbyStatusMessage = MutableStateFlow<String?>(null)
+    val lobbyStatusMessage: StateFlow<String?> = _lobbyStatusMessage.asStateFlow()
 
     private val _battleSim = MutableStateFlow<BattleSimulation?>(null)
     val battleSim: StateFlow<BattleSimulation?> = _battleSim.asStateFlow()
@@ -123,11 +171,28 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     private var latestBannerText = ""
 
     private var matchmakingJob: Job? = null
+    private var leaderboardObserverJob: Job? = null
+    private var roomObserverJob: Job? = null
+
+    private var activeTransport = ActiveTransport.NONE
+    private var isLanHost = false
+    private var lanSyncAccumulator = 0f
+
+    private var activeFirestoreRoomId: String? = null
+    private var isFirestoreHost = false
+    private var localCmdSeq = 0
+    private var localLastDirX = 0f
+    private var localLastDirY = -1f
+    private var localUltSeq = 0
+    private var lastAppliedRemoteCmdSeq = 0
+    private var lastAppliedRemoteUltSeq = 0
+    private var firestoreSyncAccumulator = 0f
 
     init {
         soundManager.isEnabled = _engineSettings.value.sfxEnabled
+        observeLanEvents()
         viewModelScope.launch {
-            delay(850)
+            delay(650)
             if (_currentScreen.value == AppScreen.LOADING) {
                 _currentScreen.value = AppScreen.HOME_HUB
             }
@@ -135,13 +200,122 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     override fun onCleared() {
+        cleanupActiveNetworkSession()
+        leaderboardObserverJob?.cancel()
         soundManager.release()
         super.onCleared()
     }
 
+    /**
+     * Auth-gated initialization: called strictly once `FirebaseAuth.currentUser != null`.
+     */
+    fun bindAuthenticatedUser(userId: String, displayName: String?) {
+        if (userId.isBlank() || boundUserId == userId) return
+        boundUserId = userId
+
+        val repo = OnlineArenaRepository(getApplication())
+        onlineRepository = repo
+
+        if (!displayName.isNullOrBlank() && _playerProfile.value.username == "Player") {
+            val cleanDisplay = displayName.trim().take(16)
+            if (cleanDisplay.isNotEmpty()) {
+                val updated = _playerProfile.value.copy(username = cleanDisplay)
+                _playerProfile.value = updated
+                prefs.edit().putString("username", cleanDisplay).apply()
+            }
+        }
+
+        viewModelScope.launch {
+            try {
+                val cloud = repo.fetchOrCreateUserProfile(
+                    userId = userId,
+                    fallbackProfile = _playerProfile.value,
+                    fallbackUnlocked = _unlockedCharacterIds.value,
+                    fallbackUpgrades = _characterUpgrades.value
+                )
+                val local = _playerProfile.value
+                val mergedWins = max(local.wins, cloud.profile.wins)
+                val mergedLosses = max(local.losses, cloud.profile.losses)
+                val mergedRating = max(local.rankedRating, cloud.profile.rankedRating)
+                val mergedLevel = max(local.level, cloud.profile.level)
+                val mergedProfile = cloud.profile.copy(
+                    username = if (local.username != "Player") local.username else cloud.profile.username,
+                    level = mergedLevel,
+                    exp = if (mergedLevel == cloud.profile.level) max(local.exp, cloud.profile.exp) else cloud.profile.exp,
+                    maxExp = 200 + (mergedLevel - 1) * 100,
+                    gold = max(local.gold, cloud.profile.gold),
+                    gems = max(local.gems, cloud.profile.gems),
+                    wins = mergedWins,
+                    losses = mergedLosses,
+                    rankedRating = mergedRating,
+                    rankTier = PlayerProfile.computeTier(mergedRating, mergedWins + mergedLosses)
+                )
+                val mergedUnlocked = _unlockedCharacterIds.value + cloud.unlockedIds + CharacterRoster.starterIds
+                val mergedUpgrades = mergeUpgradeMaps(_characterUpgrades.value, cloud.upgrades)
+
+                _playerProfile.value = mergedProfile
+                _unlockedCharacterIds.value = mergedUnlocked
+                _characterUpgrades.value = mergedUpgrades
+                persistFullLocalState(mergedProfile, mergedUnlocked, mergedUpgrades)
+                refreshLeaderboardState()
+
+                repo.saveUserProfile(userId, mergedProfile, mergedUnlocked, mergedUpgrades)
+                repo.syncLeaderboardEntry(userId, mergedProfile)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                // Keep local state playable if network is temporarily unreachable
+            }
+        }
+
+        leaderboardObserverJob?.cancel()
+        leaderboardObserverJob = viewModelScope.launch {
+            repo.observeOnlineLeaderboard()
+                .catch { /* logged by FirestoreErrorHandler */ }
+                .collect { docs ->
+                    cachedOnlineLeaderboard = docs.mapIndexed { idx, doc ->
+                        doc.toLeaderboardEntry(rank = idx + 1, currentUserId = userId)
+                    }
+                    refreshLeaderboardState()
+                }
+        }
+    }
+
+    private fun refreshLeaderboardState() {
+        _leaderboard.value = InitialGameData.buildLeaderboard(
+            profile = _playerProfile.value,
+            onlineEntries = cachedOnlineLeaderboard
+        )
+    }
+
+    private fun pushCloudSyncAsync() {
+        val uid = boundUserId ?: return
+        val repo = onlineRepository ?: return
+        val profile = _playerProfile.value
+        val unlocked = _unlockedCharacterIds.value
+        val upgrades = _characterUpgrades.value
+        viewModelScope.launch {
+            try {
+                repo.saveUserProfile(uid, profile, unlocked, upgrades)
+                repo.syncLeaderboardEntry(uid, profile)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+            }
+        }
+    }
+
     fun navigateTo(screen: AppScreen) {
+        if (screen != AppScreen.MATCHMAKING && screen != AppScreen.BATTLE_ARENA && screen != AppScreen.MULTIPLAYER_LOBBY) {
+            cleanupActiveNetworkSession()
+        }
         if (screen != AppScreen.MATCHMAKING) {
             matchmakingJob?.cancel()
+            _canStartRankedChallenger.value = false
+        }
+        if (screen == AppScreen.MULTIPLAYER_LOBBY) {
+            _localIpAddress.value = lanManager.detectLocalIpv4()
+            _lobbyStatusMessage.value = null
         }
         soundManager.playUiTap()
         _currentScreen.value = screen
@@ -152,11 +326,419 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         soundManager.playUiTap()
     }
 
+    fun selectCustomOpponent(character: CharacterData) {
+        _customOpponentCharacter.value = character
+        soundManager.playUiTap()
+    }
+
+    fun startCustomMatch() {
+        cleanupActiveNetworkSession()
+        _selectedMode.value = GameMode.CUSTOM_MATCH
+        val rival = _customOpponentCharacter.value
+        _opponentCharacter.value = rival
+        _opponentName.value = "${_botDifficulty.value.shortLabel} ${rival.name}"
+        soundManager.playUiTap()
+        _currentScreen.value = AppScreen.MATCHMAKING
+        _canStartRankedChallenger.value = false
+
+        matchmakingJob?.cancel()
+        matchmakingJob = viewModelScope.launch {
+            _matchmakingCountdown.value = 2
+            delay(400)
+            _matchmakingCountdown.value = 1
+            delay(400)
+            setupBattle(isRemote = false, remoteUpgrades = null)
+            _currentScreen.value = AppScreen.BATTLE_ARENA
+        }
+    }
+
+    // ==================== LAN WI-FI MULTIPLAYER ====================
+
+    fun startLanDiscovery() {
+        _localIpAddress.value = lanManager.detectLocalIpv4()
+        lanManager.startDiscovery()
+    }
+
+    fun hostLanRoom() {
+        cleanupFirestoreRoomSession()
+        _localIpAddress.value = lanManager.detectLocalIpv4()
+        _lobbyStatusMessage.value = null
+        val profile = _playerProfile.value
+        val peer = LanPeerInfo(
+            username = profile.username,
+            characterId = profile.selectedCharacterId,
+            upgrades = getUpgradesFor(profile.selectedCharacterId)
+        )
+        soundManager.playUiTap()
+        lanManager.startHosting(peer)
+    }
+
+    fun joinLanAddress(rawAddress: String) {
+        cleanupFirestoreRoomSession()
+        _lobbyStatusMessage.value = null
+        val profile = _playerProfile.value
+        val peer = LanPeerInfo(
+            username = profile.username,
+            characterId = profile.selectedCharacterId,
+            upgrades = getUpgradesFor(profile.selectedCharacterId)
+        )
+        soundManager.playUiTap()
+        lanManager.joinByAddress(rawAddress, peer)
+    }
+
+    fun cancelLanSession() {
+        lanManager.closeSession()
+        if (activeTransport == ActiveTransport.LAN) {
+            activeTransport = ActiveTransport.NONE
+        }
+    }
+
+    private fun observeLanEvents() {
+        viewModelScope.launch {
+            lanManager.sessionState.collect { state ->
+                if (state is LanSessionState.Connected && _currentScreen.value == AppScreen.MULTIPLAYER_LOBBY) {
+                    startLanConnectedBattle(isHost = state.isHost, peer = state.peer)
+                }
+            }
+        }
+
+        viewModelScope.launch {
+            lanManager.incomingPackets.collect { pkt ->
+                if (activeTransport != ActiveTransport.LAN) return@collect
+                val sim = _battleSim.value ?: return@collect
+                when (pkt) {
+                    is LanPacket.StartClash -> {
+                        sim.applyRemoteOpponentCommand(Vector2(pkt.dirX, -pkt.dirY), isOpening = true)
+                        if (_turnState.value == TurnState.AIM_OPENING) {
+                            _turnState.value = TurnState.NONSTOP_CLASH
+                        }
+                        syncHudState(sim, force = true)
+                    }
+
+                    is LanPacket.RedirectDash -> {
+                        sim.applyRemoteOpponentCommand(Vector2(pkt.dirX, -pkt.dirY), isOpening = false)
+                        syncHudState(sim, force = true)
+                    }
+
+                    LanPacket.TriggerUlt -> {
+                        if (!sim.opponentBall.isUltimateActive) {
+                            sim.opponentBall.ultimateCooldownRemaining = 0f
+                            sim.opponentBall.ultimateGauge = 100f
+                            sim.triggerUltimate(sim.opponentBall)
+                            syncHudState(sim, force = true)
+                        }
+                    }
+
+                    is LanPacket.HostStateSync -> {
+                        if (!isLanHost && sim.isRoundActive) {
+                            if (_turnState.value == TurnState.AIM_OPENING) {
+                                _turnState.value = TurnState.NONSTOP_CLASH
+                            }
+                            sim.applyMirroredLanSync(
+                                localNormX = pkt.guestX,
+                                localNormY = 1f - pkt.guestY,
+                                localNormVx = pkt.guestVx,
+                                localNormVy = -pkt.guestVy,
+                                remoteNormX = pkt.hostX,
+                                remoteNormY = 1f - pkt.hostY,
+                                remoteNormVx = pkt.hostVx,
+                                remoteNormVy = -pkt.hostVy,
+                                localHp = pkt.guestHp,
+                                remoteHp = pkt.hostHp,
+                                localUlt = pkt.guestUlt,
+                                remoteUlt = pkt.hostUlt
+                            )
+                            syncHudState(sim, force = false)
+                        }
+                    }
+
+                    is LanPacket.Knockout -> {
+                        if (sim.isRoundActive) {
+                            val didLocalWin = if (isLanHost) pkt.hostWon else !pkt.hostWon
+                            sim.isRoundActive = false
+                            if (didLocalWin) {
+                                sim.opponentBall.currentHp = 0f
+                            } else {
+                                sim.playerBall.currentHp = 0f
+                            }
+                            _turnState.value = TurnState.KNOCKOUT_SLOWMO
+                            soundManager.playKnockout()
+                            handleMatchEnd(didLocalWin)
+                        }
+                    }
+
+                    LanPacket.PeerDisconnected -> {
+                        if (_currentScreen.value == AppScreen.BATTLE_ARENA && sim.isRoundActive) {
+                            latestBannerText = "FRIEND DISCONNECTED • YOU WIN"
+                            sim.isRoundActive = false
+                            sim.opponentBall.currentHp = 0f
+                            _turnState.value = TurnState.KNOCKOUT_SLOWMO
+                            handleMatchEnd(true)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private fun startLanConnectedBattle(isHost: Boolean, peer: LanPeerInfo) {
+        activeTransport = ActiveTransport.LAN
+        isLanHost = isHost
+        lanSyncAccumulator = 0f
+        _selectedMode.value = GameMode.MULTIPLAYER
+        _opponentName.value = peer.username
+        _opponentCharacter.value = CharacterRoster.getById(peer.characterId)
+        setupBattle(isRemote = true, remoteUpgrades = peer.upgrades)
+        _currentScreen.value = AppScreen.BATTLE_ARENA
+    }
+
+    // ==================== INTERNET ROOM CODE & ONLINE RANKED ====================
+
+    fun createOnlineFriendRoom() {
+        val uid = boundUserId ?: return
+        val repo = onlineRepository ?: return
+        cancelLanSession()
+        cleanupFirestoreRoomSession()
+        _isOnlineRoomBusy.value = true
+        _lobbyStatusMessage.value = null
+        soundManager.playUiTap()
+
+        viewModelScope.launch {
+            try {
+                val profile = _playerProfile.value
+                val upg = getUpgradesFor(profile.selectedCharacterId)
+                val created = repo.createFriendRoom(uid, profile, upg)
+                activeFirestoreRoomId = created.roomId
+                isFirestoreHost = true
+                _activeRoomCode.value = created.roomCode
+                _isOnlineRoomBusy.value = false
+                observeFirestoreMatchRoom(created.roomId, GameMode.MULTIPLAYER)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _isOnlineRoomBusy.value = false
+                _lobbyStatusMessage.value = "Unable to create online room. Check internet connection."
+            }
+        }
+    }
+
+    fun joinOnlineFriendRoom(rawCode: String) {
+        val uid = boundUserId ?: return
+        val repo = onlineRepository ?: return
+        cancelLanSession()
+        cleanupFirestoreRoomSession()
+        _isOnlineRoomBusy.value = true
+        _lobbyStatusMessage.value = null
+        soundManager.playUiTap()
+
+        viewModelScope.launch {
+            try {
+                val profile = _playerProfile.value
+                val upg = getUpgradesFor(profile.selectedCharacterId)
+                val joined = repo.joinFriendRoomByCode(rawCode, uid, profile, upg)
+                _isOnlineRoomBusy.value = false
+                if (joined == null) {
+                    _lobbyStatusMessage.value = "Room '$rawCode' not found or already full."
+                    return@launch
+                }
+                activeFirestoreRoomId = joined.roomId
+                isFirestoreHost = false
+                _activeRoomCode.value = null
+                startFirestoreMultiplayerBattle(joined, GameMode.MULTIPLAYER)
+                observeFirestoreMatchRoom(joined.roomId, GameMode.MULTIPLAYER)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                _isOnlineRoomBusy.value = false
+                _lobbyStatusMessage.value = "Could not join room '$rawCode'. Check the code and try again."
+            }
+        }
+    }
+
+    fun cancelOnlineRoom() {
+        cleanupFirestoreRoomSession()
+        _lobbyStatusMessage.value = null
+    }
+
+    private fun observeFirestoreMatchRoom(roomId: String, mode: GameMode) {
+        val repo = onlineRepository ?: return
+        roomObserverJob?.cancel()
+        roomObserverJob = viewModelScope.launch {
+            repo.observeMatchRoom(roomId)
+                .catch { /* logged by FirestoreErrorHandler */ }
+                .collect { room ->
+                    if (room == null) return@collect
+                    handleIncomingFirestoreRoomSnapshot(room, mode)
+                }
+        }
+    }
+
+    private fun handleIncomingFirestoreRoomSnapshot(room: MatchRoomDoc, mode: GameMode) {
+        val uid = boundUserId ?: return
+
+        // Host waiting in lobby or ranked queue -> guest just joined!
+        if (activeTransport != ActiveTransport.FIRESTORE &&
+            room.status == "active" &&
+            room.guestUid.isNotEmpty()
+        ) {
+            matchmakingJob?.cancel()
+            _canStartRankedChallenger.value = false
+            _activeRoomCode.value = null
+            startFirestoreMultiplayerBattle(room, mode)
+            return
+        }
+
+        if (activeTransport != ActiveTransport.FIRESTORE) return
+        val sim = _battleSim.value ?: return
+
+        val remoteCmdSeq = if (isFirestoreHost) room.guestCmdSeq else room.hostCmdSeq
+        val remoteDirX = if (isFirestoreHost) room.guestDirX else room.hostDirX
+        val remoteDirY = if (isFirestoreHost) room.guestDirY else room.hostDirY
+        val remoteUltSeq = if (isFirestoreHost) room.guestUltSeq else room.hostUltSeq
+        val remoteReportedHp = if (isFirestoreHost) room.guestSyncHp else room.hostSyncHp
+
+        if (remoteCmdSeq > lastAppliedRemoteCmdSeq) {
+            val isFirstMove = lastAppliedRemoteCmdSeq == 0 && !sim.isClashStarted
+            lastAppliedRemoteCmdSeq = remoteCmdSeq
+            sim.applyRemoteOpponentCommand(Vector2(remoteDirX, -remoteDirY), isOpening = isFirstMove)
+            if (_turnState.value == TurnState.AIM_OPENING) {
+                _turnState.value = TurnState.NONSTOP_CLASH
+            }
+            syncHudState(sim, force = true)
+        }
+
+        if (remoteUltSeq > lastAppliedRemoteUltSeq) {
+            lastAppliedRemoteUltSeq = remoteUltSeq
+            if (!sim.opponentBall.isUltimateActive) {
+                sim.opponentBall.ultimateCooldownRemaining = 0f
+                sim.opponentBall.ultimateGauge = 100f
+                sim.triggerUltimate(sim.opponentBall)
+                syncHudState(sim, force = true)
+            }
+        }
+
+        if (sim.isRoundActive && sim.isClashStarted && remoteReportedHp > 0) {
+            val blended = (sim.opponentBall.currentHp * 0.5f) + (remoteReportedHp.toFloat() * 0.5f)
+            sim.opponentBall.currentHp = blended.coerceIn(1f, sim.opponentBall.maxHp)
+        }
+
+        if (room.status == "finished" && room.winnerUid.isNotEmpty() && sim.isRoundActive) {
+            val didWin = room.winnerUid == uid
+            sim.isRoundActive = false
+            if (didWin) {
+                sim.opponentBall.currentHp = 0f
+            } else {
+                sim.playerBall.currentHp = 0f
+            }
+            _turnState.value = TurnState.KNOCKOUT_SLOWMO
+            soundManager.playKnockout()
+            handleMatchEnd(didWin)
+        }
+    }
+
+    private fun startFirestoreMultiplayerBattle(room: MatchRoomDoc, mode: GameMode) {
+        activeTransport = ActiveTransport.FIRESTORE
+        activeFirestoreRoomId = room.roomId
+        localCmdSeq = 0
+        localUltSeq = 0
+        lastAppliedRemoteCmdSeq = 0
+        lastAppliedRemoteUltSeq = 0
+        firestoreSyncAccumulator = 0f
+        _selectedMode.value = mode
+
+        val oppName = if (isFirestoreHost) room.guestName.ifBlank { "Online Rival" } else room.hostName.ifBlank { "Online Rival" }
+        val oppCharId = if (isFirestoreHost) room.guestCharId else room.hostCharId
+        val oppUpg = if (isFirestoreHost) {
+            CharacterUpgradeState(room.guestHpLvl, room.guestPwrLvl, room.guestCdLvl)
+        } else {
+            CharacterUpgradeState(room.hostHpLvl, room.hostPwrLvl, room.hostCdLvl)
+        }
+
+        _opponentName.value = oppName
+        _opponentCharacter.value = CharacterRoster.getById(oppCharId)
+        setupBattle(isRemote = true, remoteUpgrades = oppUpg)
+        _currentScreen.value = AppScreen.BATTLE_ARENA
+    }
+
+    private fun pushFirestoreCombatStateAsync(status: String = "active", winnerUid: String = "") {
+        val roomId = activeFirestoreRoomId ?: return
+        val repo = onlineRepository ?: return
+        val sim = _battleSim.value ?: return
+        val myHp = sim.playerBall.currentHp.toInt().coerceAtLeast(0)
+        val oppHp = sim.opponentBall.currentHp.toInt().coerceAtLeast(0)
+        val cmd = localCmdSeq
+        val dx = localLastDirX
+        val dy = localLastDirY
+        val ult = localUltSeq
+        val hostFlag = isFirestoreHost
+
+        viewModelScope.launch {
+            try {
+                if (hostFlag) {
+                    repo.sendHostCombatUpdate(
+                        roomId = roomId,
+                        cmdSeq = cmd,
+                        dirX = dx,
+                        dirY = dy,
+                        ultSeq = ult,
+                        hostSyncHp = myHp,
+                        guestSyncHp = oppHp,
+                        status = status,
+                        winnerUid = winnerUid
+                    )
+                } else {
+                    repo.sendGuestCombatUpdate(
+                        roomId = roomId,
+                        cmdSeq = cmd,
+                        dirX = dx,
+                        dirY = dy,
+                        ultSeq = ult,
+                        guestSyncHp = myHp,
+                        status = status,
+                        winnerUid = winnerUid
+                    )
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+            }
+        }
+    }
+
+    private fun cleanupFirestoreRoomSession() {
+        roomObserverJob?.cancel()
+        roomObserverJob = null
+        val oldRoomId = activeFirestoreRoomId
+        val wasHost = isFirestoreHost
+        activeFirestoreRoomId = null
+        _activeRoomCode.value = null
+        _isOnlineRoomBusy.value = false
+        if (activeTransport == ActiveTransport.FIRESTORE) {
+            activeTransport = ActiveTransport.NONE
+        }
+        if (oldRoomId != null && wasHost) {
+            val repo = onlineRepository
+            if (repo != null) {
+                viewModelScope.launch {
+                    repo.deleteRoomSafely(oldRoomId)
+                }
+            }
+        }
+    }
+
+    private fun cleanupActiveNetworkSession() {
+        cancelLanSession()
+        cleanupFirestoreRoomSession()
+    }
+
+    // ==================== SETTINGS & PROGRESSION ====================
+
     fun updateEngineSettings(newSettings: EngineSettings) {
-        _engineSettings.value = newSettings
-        soundManager.isEnabled = newSettings.sfxEnabled
-        _battleSim.value?.engineSettings = newSettings
-        persistEngineSettings(newSettings)
+        val synced = newSettings.copy(bloomPostFx = newSettings.renderMode.bloomGlow)
+        _engineSettings.value = synced
+        soundManager.isEnabled = synced.sfxEnabled
+        _battleSim.value?.engineSettings = synced
+        persistEngineSettings(synced)
     }
 
     fun toggleSfx() {
@@ -180,8 +762,9 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         if (trimmed.isNotEmpty()) {
             val updated = _playerProfile.value.copy(username = trimmed)
             _playerProfile.value = updated
-            _leaderboard.value = InitialGameData.buildLeaderboard(updated)
+            refreshLeaderboardState()
             prefs.edit().putString("username", trimmed).apply()
+            pushCloudSyncAsync()
             soundManager.playUiTap()
         }
     }
@@ -195,7 +778,8 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         _unlockedCharacterIds.value = CharacterRoster.starterIds
         _characterUpgrades.value = emptyMap()
         _quests.value = InitialGameData.defaultQuests
-        _leaderboard.value = InitialGameData.buildLeaderboard(freshProfile)
+        refreshLeaderboardState()
+        pushCloudSyncAsync()
         triggerHaptic(35L)
     }
 
@@ -203,10 +787,6 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         return _characterUpgrades.value[charId] ?: CharacterUpgradeState()
     }
 
-    /**
-     * Upgrades Health (+35 HP), Power (+2 DMG & +0.04x Ult), or Lower CD (-0.45s Ult CD & -0.09s Redirect CD)
-     * with high escalating Gold costs (2,500 G -> 135,000 G per stat).
-     */
     fun upgradeCharacterStat(charId: String, statType: UpgradeStatType): Boolean {
         if (!_unlockedCharacterIds.value.contains(charId)) return false
         val current = getUpgradesFor(charId)
@@ -244,6 +824,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         }
         _quests.value = updatedQuests
         persistQuests(updatedQuests)
+        pushCloudSyncAsync()
 
         soundManager.playUpgradeForge()
         triggerHaptic(45L)
@@ -254,8 +835,9 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         if (!_unlockedCharacterIds.value.contains(charId)) return
         val updated = _playerProfile.value.copy(selectedCharacterId = charId)
         _playerProfile.value = updated
-        _leaderboard.value = InitialGameData.buildLeaderboard(updated)
+        refreshLeaderboardState()
         prefs.edit().putString("selected_char", charId).apply()
+        pushCloudSyncAsync()
         soundManager.playUiTap()
     }
 
@@ -280,7 +862,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
                 selectedCharacterId = character.id
             )
             _playerProfile.value = updatedProfile
-            _leaderboard.value = InitialGameData.buildLeaderboard(updatedProfile)
+            refreshLeaderboardState()
 
             val currentSet = _unlockedCharacterIds.value.toMutableSet()
             currentSet.add(character.id)
@@ -292,6 +874,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
                 .putString("selected_char", character.id)
                 .putStringSet("unlocked_chars", currentSet)
                 .apply()
+            pushCloudSyncAsync()
             soundManager.playUpgradeForge()
             triggerHaptic(45L)
             return true
@@ -315,14 +898,29 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
             )
             _playerProfile.value = updated
             prefs.edit().putInt("gold", updated.gold).putInt("gems", updated.gems).apply()
+            pushCloudSyncAsync()
             soundManager.playUpgradeForge()
             triggerHaptic(35L)
         }
     }
 
+    // ==================== MATCHMAKING & ARENA LIFECYCLE ====================
+
     fun startMatchmaking(mode: GameMode, difficulty: BotDifficulty = _botDifficulty.value) {
+        if (mode == GameMode.CUSTOM_MATCH) {
+            _botDifficulty.value = difficulty
+            startCustomMatch()
+            return
+        }
+        if (mode == GameMode.MULTIPLAYER) {
+            navigateTo(AppScreen.MULTIPLAYER_LOBBY)
+            return
+        }
+
+        cleanupActiveNetworkSession()
         _selectedMode.value = mode
         _botDifficulty.value = difficulty
+        _canStartRankedChallenger.value = false
         soundManager.playUiTap()
         _currentScreen.value = AppScreen.MATCHMAKING
 
@@ -331,27 +929,92 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         val oppChar = candidates.random()
         _opponentCharacter.value = oppChar
 
-        _opponentName.value = when (mode) {
-            GameMode.PRACTICE_BOT -> "${difficulty.shortLabel} ${oppChar.name}"
-            GameMode.ONLINE_MATCH -> listOf(
-                "KuroBlade", "RaidenZero", "SoraVortex", "Akira_JP",
-                "AbyssWalker", "ZenithStrike", "CrimsonRift", "ValkyrieNine"
-            ).random()
-            GameMode.FRIENDS_LOBBY -> "Rival ${oppChar.name}"
+        if (mode == GameMode.ONLINE_MATCH) {
+            _opponentName.value = "Searching Online..."
+            _matchmakingCountdown.value = -1
+
+            val uid = boundUserId
+            val repo = onlineRepository
+            matchmakingJob?.cancel()
+            matchmakingJob = viewModelScope.launch {
+                if (uid != null && repo != null) {
+                    try {
+                        val upg = getUpgradesFor(playerChar.id)
+                        when (val result = repo.findOrCreateRankedRoom(uid, _playerProfile.value, upg)) {
+                            is RankedQueueResult.JoinedExisting -> {
+                                activeFirestoreRoomId = result.room.roomId
+                                isFirestoreHost = false
+                                _opponentName.value = result.room.hostName.ifBlank { "Online Challenger" }
+                                _opponentCharacter.value = CharacterRoster.getById(result.room.hostCharId)
+                                _matchmakingCountdown.value = 2
+                                delay(450)
+                                _matchmakingCountdown.value = 1
+                                delay(450)
+                                startFirestoreMultiplayerBattle(result.room, GameMode.ONLINE_MATCH)
+                                observeFirestoreMatchRoom(result.room.roomId, GameMode.ONLINE_MATCH)
+                                return@launch
+                            }
+
+                            is RankedQueueResult.HostingWaiting -> {
+                                activeFirestoreRoomId = result.room.roomId
+                                isFirestoreHost = true
+                                observeFirestoreMatchRoom(result.room.roomId, GameMode.ONLINE_MATCH)
+                                delay(2600)
+                                if (_currentScreen.value == AppScreen.MATCHMAKING && activeTransport != ActiveTransport.FIRESTORE) {
+                                    _canStartRankedChallenger.value = true
+                                }
+                                return@launch
+                            }
+                        }
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (_: Exception) {
+                        // Fall through to Challenger fallback option
+                    }
+                }
+                delay(1200)
+                startRankedChallengerFallback()
+            }
+            return
         }
 
+        // Practice Bot mode (Normal = Hard, Hard = Extreme)
+        _opponentName.value = "${difficulty.shortLabel} ${oppChar.name}"
         matchmakingJob?.cancel()
         matchmakingJob = viewModelScope.launch {
             _matchmakingCountdown.value = 2
-            delay(480)
+            delay(460)
             _matchmakingCountdown.value = 1
-            delay(480)
-            setupBattle()
+            delay(460)
+            setupBattle(isRemote = false, remoteUpgrades = null)
             _currentScreen.value = AppScreen.BATTLE_ARENA
         }
     }
 
-    private fun setupBattle() {
+    fun startRankedChallengerFallback() {
+        cleanupFirestoreRoomSession()
+        _canStartRankedChallenger.value = false
+        val playerChar = CharacterRoster.getById(_playerProfile.value.selectedCharacterId)
+        val oppChar = CharacterRoster.characters.filter { it.id != playerChar.id }.random()
+        _opponentCharacter.value = oppChar
+        _opponentName.value = listOf(
+            "KuroBlade", "RaidenZero", "SoraVortex", "Akira_JP",
+            "AbyssWalker", "ZenithStrike", "CrimsonRift", "ValkyrieNine"
+        ).random()
+
+        matchmakingJob?.cancel()
+        matchmakingJob = viewModelScope.launch {
+            _matchmakingCountdown.value = 2
+            delay(420)
+            _matchmakingCountdown.value = 1
+            delay(420)
+            _botDifficulty.value = if (_playerProfile.value.rankedRating >= 400) BotDifficulty.HARD else BotDifficulty.MEDIUM
+            setupBattle(isRemote = false, remoteUpgrades = null)
+            _currentScreen.value = AppScreen.BATTLE_ARENA
+        }
+    }
+
+    private fun setupBattle(isRemote: Boolean, remoteUpgrades: CharacterUpgradeState?) {
         damageDealtInMatch = 0
         damageTakenInMatch = 0
         maxComboInMatch = 0
@@ -364,20 +1027,24 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         val oppChar = _opponentCharacter.value
         val playerUpg = getUpgradesFor(playerChar.id)
 
-        val aiTierLv = when (_selectedMode.value) {
-            GameMode.ONLINE_MATCH -> (_playerProfile.value.level / 2).coerceIn(1, 5)
-            GameMode.FRIENDS_LOBBY -> 1
-            GameMode.PRACTICE_BOT -> when (_botDifficulty.value) {
-                BotDifficulty.EASY -> 0
-                BotDifficulty.MEDIUM -> 1
-                BotDifficulty.HARD -> 3
+        val oppUpg = if (isRemote && remoteUpgrades != null) {
+            remoteUpgrades
+        } else {
+            val aiTierLv = when (_selectedMode.value) {
+                GameMode.ONLINE_MATCH -> (_playerProfile.value.level / 2 + 2).coerceIn(2, 7)
+                GameMode.MULTIPLAYER -> 2
+                GameMode.PRACTICE_BOT, GameMode.CUSTOM_MATCH -> when (_botDifficulty.value) {
+                    BotDifficulty.EASY -> 0
+                    BotDifficulty.MEDIUM -> 3
+                    BotDifficulty.HARD -> 6
+                }
             }
+            CharacterUpgradeState(
+                healthLevel = aiTierLv,
+                powerLevel = aiTierLv,
+                cooldownLevel = aiTierLv
+            )
         }
-        val aiUpg = CharacterUpgradeState(
-            healthLevel = aiTierLv,
-            powerLevel = aiTierLv,
-            cooldownLevel = aiTierLv
-        )
 
         val pBall = CombatBall(
             id = "player",
@@ -396,13 +1063,16 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
             velocity = Vector2.Zero,
             radius = 52f,
             character = oppChar,
-            upgrades = aiUpg
+            upgrades = oppUpg
         )
+
+        val rivalTag = if (isRemote) "RIVAL" else "BOT"
 
         val sim = BattleSimulation(
             playerBall = pBall,
             opponentBall = oBall,
             engineSettings = _engineSettings.value,
+            isRemoteMultiplayer = isRemote,
             onCollisionImpact = { isPlayerAttacker, damage, isCrit, passiveLabel ->
                 soundManager.playBallClash(isCrit)
                 triggerHaptic(if (isCrit) 55L else 25L)
@@ -424,21 +1094,30 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
                 _turnState.value = TurnState.KNOCKOUT_SLOWMO
                 soundManager.playKnockout()
                 triggerHaptic(140L)
+                if (activeTransport == ActiveTransport.LAN && isLanHost) {
+                    lanManager.sendKnockout(hostWon = isPlayerWinner)
+                } else if (activeTransport == ActiveTransport.FIRESTORE) {
+                    val uid = boundUserId.orEmpty()
+                    val winner = if (isPlayerWinner) uid else "remote"
+                    if (isFirestoreHost || !isPlayerWinner) {
+                        pushFirestoreCombatStateAsync(status = "finished", winnerUid = winner)
+                    }
+                }
                 handleMatchEnd(isPlayerWinner)
             },
             onUltimateActivated = { isPlayer, ultName ->
                 soundManager.playAwakening(isPlayer)
                 triggerHaptic(80L)
                 latestBannerText = if (isPlayer) {
-                    "YOU AWAKENED • $ultName!"
+                    "YOU USED $ultName!"
                 } else {
-                    "AI AWAKENED • $ultName!"
+                    "$rivalTag USED $ultName!"
                 }
             },
             onPassiveTriggered = { isPlayer, passiveName ->
                 soundManager.playPassiveTrigger()
-                val who = if (isPlayer) "YOUR" else "RIVAL"
-                latestBannerText = "$who PASSIVE • $passiveName"
+                val who = if (isPlayer) "YOU" else rivalTag
+                latestBannerText = "$who • $passiveName"
             },
             onRedirectUsed = { isPlayer ->
                 if (isPlayer) {
@@ -459,7 +1138,37 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         sim.update(dt)
 
         if (sim.isRoundActive && _turnState.value == TurnState.NONSTOP_CLASH) {
-            sim.performAiTacticalStep(dt, _botDifficulty.value)
+            if (!sim.isRemoteMultiplayer) {
+                sim.performAiTacticalStep(dt, _botDifficulty.value)
+            } else if (activeTransport == ActiveTransport.LAN && isLanHost) {
+                lanSyncAccumulator += dt
+                if (lanSyncAccumulator >= 0.05f) {
+                    lanSyncAccumulator = 0f
+                    val w = sim.arenaWidth.coerceAtLeast(1f)
+                    val h = sim.arenaHeight.coerceAtLeast(1f)
+                    val spd = sim.baseArenaSpeed.coerceAtLeast(200f)
+                    lanManager.sendHostStateSync(
+                        hostX = sim.playerBall.position.x / w,
+                        hostY = sim.playerBall.position.y / h,
+                        hostVx = sim.playerBall.velocity.x / spd,
+                        hostVy = sim.playerBall.velocity.y / spd,
+                        guestX = sim.opponentBall.position.x / w,
+                        guestY = sim.opponentBall.position.y / h,
+                        guestVx = sim.opponentBall.velocity.x / spd,
+                        guestVy = sim.opponentBall.velocity.y / spd,
+                        hostHp = sim.playerBall.currentHp,
+                        guestHp = sim.opponentBall.currentHp,
+                        hostUlt = sim.playerBall.ultimateGauge,
+                        guestUlt = sim.opponentBall.ultimateGauge
+                    )
+                }
+            } else if (activeTransport == ActiveTransport.FIRESTORE) {
+                firestoreSyncAccumulator += dt
+                if (firestoreSyncAccumulator >= 0.35f) {
+                    firestoreSyncAccumulator = 0f
+                    pushFirestoreCombatStateAsync()
+                }
+            }
         }
 
         syncHudState(sim, force = false)
@@ -479,14 +1188,18 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
                 _turnState.value = TurnState.NONSTOP_CLASH
                 soundManager.playRedirectDash()
                 triggerHaptic(30L)
+                broadcastLocalMove(launchDir, isOpening = true)
                 syncHudState(sim, force = true)
             }
+
             TurnState.NONSTOP_CLASH -> {
                 if (sim.redirectPlayerBall(launchDir)) {
                     triggerHaptic(22L)
+                    broadcastLocalMove(launchDir, isOpening = false)
                     syncHudState(sim, force = true)
                 }
             }
+
             TurnState.KNOCKOUT_SLOWMO -> Unit
         }
     }
@@ -499,6 +1212,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         _turnState.value = TurnState.NONSTOP_CLASH
         soundManager.playRedirectDash()
         triggerHaptic(30L)
+        broadcastLocalMove(toEnemy, isOpening = true)
         syncHudState(sim, force = true)
     }
 
@@ -507,7 +1221,28 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         if (!sim.isRoundActive) return
         if (sim.triggerUltimate(sim.playerBall)) {
             ultimatesUsedInMatch++
+            if (activeTransport == ActiveTransport.LAN) {
+                lanManager.sendUltimate()
+            } else if (activeTransport == ActiveTransport.FIRESTORE) {
+                localUltSeq++
+                pushFirestoreCombatStateAsync()
+            }
             syncHudState(sim, force = true)
+        }
+    }
+
+    private fun broadcastLocalMove(dir: Vector2, isOpening: Boolean) {
+        if (activeTransport == ActiveTransport.LAN) {
+            if (isOpening) {
+                lanManager.sendStartClash(dir.x, dir.y)
+            } else {
+                lanManager.sendRedirectDash(dir.x, dir.y)
+            }
+        } else if (activeTransport == ActiveTransport.FIRESTORE) {
+            localCmdSeq++
+            localLastDirX = dir.x
+            localLastDirY = dir.y
+            pushFirestoreCombatStateAsync()
         }
     }
 
@@ -557,19 +1292,24 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
 
         val diffBonus = when (_botDifficulty.value) {
             BotDifficulty.EASY -> 0
-            BotDifficulty.MEDIUM -> 280
-            BotDifficulty.HARD -> 650
+            BotDifficulty.MEDIUM -> 380
+            BotDifficulty.HARD -> 820
         }
-        val modeBonus = if (_selectedMode.value == GameMode.ONLINE_MATCH) 350 else 0
+        val modeBonus = when (_selectedMode.value) {
+            GameMode.ONLINE_MATCH -> 550
+            GameMode.MULTIPLAYER -> 420
+            GameMode.CUSTOM_MATCH -> 260
+            GameMode.PRACTICE_BOT -> 0
+        }
         val comboBonus = (maxComboInMatch * 35).coerceAtMost(350)
 
         val goldEarned = if (isPlayerWinner) {
-            950 + diffBonus + modeBonus + comboBonus
+            1_050 + diffBonus + modeBonus + comboBonus
         } else {
-            320 + (comboBonus / 2)
+            340 + (comboBonus / 2)
         }
-        val gemsEarned = if (isPlayerWinner) 25 else 8
-        val expEarned = if (isPlayerWinner) 150 else 55
+        val gemsEarned = if (isPlayerWinner) 28 else 9
+        val expEarned = if (isPlayerWinner) 165 else 60
         val elapsedSec = ((System.currentTimeMillis() - matchStartMillis) / 1000L).toInt().coerceAtLeast(1)
 
         val stats = MatchStatistics(
@@ -619,10 +1359,10 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
 
         val newWins = if (isPlayerWinner) profile.wins + 1 else profile.wins
         val newLosses = if (!isPlayerWinner) profile.losses + 1 else profile.losses
-        val ratingDelta = if (_selectedMode.value == GameMode.ONLINE_MATCH) {
-            if (isPlayerWinner) 35 else -15
-        } else {
-            if (isPlayerWinner) 15 else 0
+        val ratingDelta = when (_selectedMode.value) {
+            GameMode.ONLINE_MATCH -> if (isPlayerWinner) 40 else -18
+            GameMode.MULTIPLAYER -> if (isPlayerWinner) 20 else 0
+            else -> if (isPlayerWinner) 12 else 0
         }
         val newRating = (profile.rankedRating + ratingDelta).coerceAtLeast(0)
         val newTier = PlayerProfile.computeTier(newRating, newWins + newLosses)
@@ -639,7 +1379,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
             rankTier = newTier
         )
         _playerProfile.value = updatedProfile
-        _leaderboard.value = InitialGameData.buildLeaderboard(updatedProfile)
+        refreshLeaderboardState()
 
         prefs.edit()
             .putInt("gold", newGold)
@@ -652,12 +1392,63 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
             .putInt("rating", newRating)
             .apply()
 
+        pushCloudSyncAsync()
+
         viewModelScope.launch {
             delay(950)
+            cleanupActiveNetworkSession()
             if (_currentScreen.value == AppScreen.BATTLE_ARENA) {
                 _currentScreen.value = AppScreen.RESULT
             }
         }
+    }
+
+    private fun mergeUpgradeMaps(
+        local: Map<String, CharacterUpgradeState>,
+        cloud: Map<String, CharacterUpgradeState>
+    ): Map<String, CharacterUpgradeState> {
+        val keys = local.keys + cloud.keys
+        if (keys.isEmpty()) return emptyMap()
+        val out = HashMap<String, CharacterUpgradeState>(keys.size)
+        for (k in keys) {
+            val a = local[k]
+            val b = cloud[k]
+            out[k] = when {
+                a == null -> b!!
+                b == null -> a
+                else -> CharacterUpgradeState(
+                    healthLevel = max(a.healthLevel, b.healthLevel),
+                    powerLevel = max(a.powerLevel, b.powerLevel),
+                    cooldownLevel = max(a.cooldownLevel, b.cooldownLevel)
+                )
+            }
+        }
+        return out
+    }
+
+    private fun persistFullLocalState(
+        profile: PlayerProfile,
+        unlocked: Set<String>,
+        upgrades: Map<String, CharacterUpgradeState>
+    ) {
+        val editor = prefs.edit()
+            .putString("username", profile.username)
+            .putInt("gold", profile.gold)
+            .putInt("gems", profile.gems)
+            .putInt("exp", profile.exp)
+            .putInt("max_exp", profile.maxExp)
+            .putInt("level", profile.level)
+            .putString("selected_char", profile.selectedCharacterId)
+            .putInt("wins", profile.wins)
+            .putInt("losses", profile.losses)
+            .putInt("rating", profile.rankedRating)
+            .putStringSet("unlocked_chars", unlocked)
+        upgrades.forEach { (id, st) ->
+            editor.putInt("upg_hp_$id", st.healthLevel)
+            editor.putInt("upg_pwr_$id", st.powerLevel)
+            editor.putInt("upg_cd_$id", st.cooldownLevel)
+        }
+        editor.apply()
     }
 
     private fun triggerHaptic(durationMs: Long) {
@@ -764,7 +1555,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
             targetFps = fps,
             sfxEnabled = sfx,
             hapticsEnabled = haptics,
-            bloomPostFx = render == RenderMode.REALISTIC,
+            bloomPostFx = render.bloomGlow,
             screenShake = shake
         )
     }

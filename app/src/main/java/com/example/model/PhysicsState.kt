@@ -49,6 +49,17 @@ data class VerletHairNode(
     }
 }
 
+enum class AbilityVfxStyle {
+    SHOCKWAVE,
+    SLASH_CROSS,
+    DOMAIN_SIGIL,
+    LIGHTNING_NOVA,
+    GRAVITY_IMPLODE,
+    HEAL_BLOOM,
+    TIME_DIAL,
+    METEOR_BURST
+}
+
 data class CombatBall(
     var id: String,
     var name: String,
@@ -66,7 +77,9 @@ data class CombatBall(
     var deformAngle: Float = 0f,
     var weaponAngle: Float = 0f,
     var weaponSpinBurst: Float = 0f,
+    var weaponScale: Float = 1.0f,
     var hitFlashTimer: Float = 0f,
+    var passiveFlashTimer: Float = 0f,
     var hairNodes: List<VerletHairNode> = emptyList(),
     var ultimateGauge: Float = 0f,
     var isUltimateActive: Boolean = false,
@@ -91,7 +104,7 @@ data class CombatBall(
     var isShieldActive: Boolean = false,
     var isSeriousActive: Boolean = false,
     var wallBounceCombo: Int = 0,
-    val trailPositions: ArrayDeque<Vector2> = ArrayDeque(10)
+    val trailPositions: ArrayDeque<Vector2> = ArrayDeque(12)
 ) {
     init {
         val computedMax = upgrades.effectiveMaxHp(character.maxHp).toFloat()
@@ -124,6 +137,9 @@ data class CombatBall(
     val effectiveRedirectCooldownSec: Float
         get() = (3.0f - upgrades.redirectCooldownReduction()).coerceAtLeast(1.65f)
 
+    val targetWeaponScale: Float
+        get() = computeUltimateWeaponScale(character, isUltimateActive)
+
     fun addUltimate(amount: Float) {
         if (isUltimateActive || ultimateCooldownRemaining > 0f) return
         val gainMult = when {
@@ -133,6 +149,32 @@ data class CombatBall(
             else -> 1.0f
         }
         ultimateGauge = (ultimateGauge + amount * gainMult).coerceIn(0f, 100f)
+    }
+
+    companion object {
+        fun computeUltimateWeaponScale(character: CharacterData, isUltimateActive: Boolean): Float {
+            if (!isUltimateActive) return 1.0f
+            if (character.id == "guts_berserk") return 1.92f
+            if (character.id == "simon_spiral") return 1.88f
+            if (character.id == "asta_grimoire") return 1.78f
+            return when (character.weaponType) {
+                WeaponVisualType.GRIMOIRE_GREATSWORD -> 1.76f
+                WeaponVisualType.EXCALIBUR_BLADE -> 1.72f
+                WeaponVisualType.SPIRAL_DRILL -> 1.80f
+                WeaponVisualType.ZANGETSU_BLADE -> 1.65f
+                WeaponVisualType.CRESCENT_SCYTHE -> 1.62f
+                WeaponVisualType.DEMON_KANABO -> 1.60f
+                WeaponVisualType.CHAINSAW_BLADE -> 1.58f
+                WeaponVisualType.SERIOUS_GLOVE -> 1.64f
+                WeaponVisualType.GOMU_FIST -> 1.68f
+                WeaponVisualType.LIMITLESS_ORBS -> 1.66f
+                WeaponVisualType.ALCHEMY_SPEAR -> 1.56f
+                WeaponVisualType.NICHIRIN_KATANA,
+                WeaponVisualType.TRIPLE_KATANA,
+                WeaponVisualType.TITAN_BLADES -> 1.48f
+                else -> 1.42f
+            }
+        }
     }
 }
 
@@ -156,7 +198,8 @@ data class ShockwaveRing(
     val color: Color,
     val maxRadius: Float,
     var life: Float,
-    val maxLife: Float
+    val maxLife: Float,
+    val style: AbilityVfxStyle = AbilityVfxStyle.SHOCKWAVE
 )
 
 data class FloatingCombatText(

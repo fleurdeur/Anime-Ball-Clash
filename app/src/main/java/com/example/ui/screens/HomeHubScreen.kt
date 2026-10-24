@@ -87,12 +87,14 @@ fun HomeHubScreen(
     onUpdateUsername: (String) -> Unit,
     onSaveEngineSettings: (EngineSettings) -> Unit,
     onQuickToggleTheme: () -> Unit,
-    onResetAccount: () -> Unit
+    onResetAccount: () -> Unit,
+    onSignOut: (() -> Unit)? = null
 ) {
     val palette = AppTheme.palette
     var selectedMode by remember { mutableStateOf(GameMode.PRACTICE_BOT) }
     var showSettingsDialog by remember { mutableStateOf(false) }
     var showRenameDialog by remember { mutableStateOf(false) }
+    var previewUltOnStage by remember(profile.selectedCharacterId) { mutableStateOf(false) }
     var draftName by remember(profile.username) { mutableStateOf(profile.username) }
 
     val activeCharacter = remember(profile.selectedCharacterId) {
@@ -297,45 +299,63 @@ fun HomeHubScreen(
                                     ) {
                                         val isVillain = activeCharacter.alignment == com.example.model.CharacterAlignment.ANTAGONIST
                                         Surface(
-                                            color = if (isVillain) Color(0xFF3D1924) else Color(0xFF172D44),
+                                            color = if (isVillain) palette.primaryAccentSoft else palette.blueAccentSoft,
                                             shape = RoundedCornerShape(8.dp)
                                         ) {
                                             Text(
                                                 text = activeCharacter.alignment.badgeLabel,
                                                 style = MaterialTheme.typography.labelSmall,
-                                                color = if (isVillain) Color(0xFFFF8A9B) else Color(0xFF7CC4FA),
+                                                color = if (isVillain) palette.primaryAccent else palette.blueAccent,
                                                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                                             )
                                         }
                                         Surface(
-                                            color = Color(0xFF232A3B),
-                                            shape = RoundedCornerShape(8.dp)
+                                            color = palette.cardSurface,
+                                            shape = RoundedCornerShape(8.dp),
+                                            border = BorderStroke(1.dp, palette.border)
                                         ) {
                                             Text(
                                                 text = if (activeUpgrades.totalUpgrades > 0) {
-                                                    "${activeCharacter.classType.displayName} • +${activeUpgrades.totalUpgrades} Forged"
+                                                    "${activeCharacter.classType.displayName} • +${activeUpgrades.totalUpgrades} Up"
                                                 } else {
                                                     "${activeCharacter.classType.displayName} • ${activeCharacter.popularityTier.displayName}"
                                                 },
                                                 style = MaterialTheme.typography.labelSmall,
-                                                color = Color(0xFFD6DEEE),
-                                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                                                color = palette.textSecondary,
+                                                modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp)
                                             )
                                         }
                                     }
 
-                                    Surface(
-                                        onClick = { onNavigate(AppScreen.CHARACTER_SELECT) },
-                                        color = Color(0xFF232A3B),
-                                        shape = RoundedCornerShape(8.dp),
-                                        modifier = Modifier.testTag("roster_shortcut_button")
-                                    ) {
-                                        Text(
-                                            text = "$unlockedCount/${CharacterRoster.characters.size} Roster",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = Color(0xFF8AB4F8),
-                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
-                                        )
+                                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        Surface(
+                                            onClick = { previewUltOnStage = !previewUltOnStage },
+                                            color = if (previewUltOnStage) palette.goldAccentSoft else palette.cardSurface,
+                                            shape = RoundedCornerShape(8.dp),
+                                            border = BorderStroke(1.dp, if (previewUltOnStage) palette.goldAccent else palette.border),
+                                            modifier = Modifier.testTag("home_ult_preview_toggle")
+                                        ) {
+                                            Text(
+                                                text = if (previewUltOnStage) "Ult ON" else "Show Ult",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = if (previewUltOnStage) palette.goldAccent else palette.textSecondary,
+                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                            )
+                                        }
+                                        Surface(
+                                            onClick = { onNavigate(AppScreen.CHARACTER_SELECT) },
+                                            color = palette.cardSurface,
+                                            shape = RoundedCornerShape(8.dp),
+                                            border = BorderStroke(1.dp, palette.border),
+                                            modifier = Modifier.testTag("roster_shortcut_button")
+                                        ) {
+                                            Text(
+                                                text = "$unlockedCount/${CharacterRoster.characters.size}",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = palette.blueAccent,
+                                                modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp)
+                                            )
+                                        }
                                     }
                                 }
 
@@ -350,13 +370,14 @@ fun HomeHubScreen(
                                         onClick = { onCycleCharacter(-1) },
                                         modifier = Modifier
                                             .size(48.dp)
-                                            .background(Color(0xFF232A3B), CircleShape)
+                                            .background(palette.cardSurface, CircleShape)
+                                            .border(1.dp, palette.border, CircleShape)
                                             .testTag("prev_fighter_button")
                                     ) {
                                         Icon(
                                             Icons.AutoMirrored.Filled.KeyboardArrowLeft,
                                             contentDescription = "Previous Fighter",
-                                            tint = Color(0xFFE8ECF4)
+                                            tint = palette.stageOnSurface
                                         )
                                     }
 
@@ -364,12 +385,13 @@ fun HomeHubScreen(
                                         modifier = Modifier
                                             .size(134.dp)
                                             .clip(CircleShape)
-                                            .clickable { onNavigate(AppScreen.CHARACTER_SELECT) }
+                                            .clickable { previewUltOnStage = !previewUltOnStage }
                                     ) {
                                         AnimeBallRenderer.drawPreviewAvatar(
                                             scope = this,
                                             character = activeCharacter,
-                                            weaponAngle = 0.68f
+                                            weaponAngle = if (previewUltOnStage) 1.15f else 0.68f,
+                                            isUltimatePreview = previewUltOnStage
                                         )
                                     }
 
@@ -377,13 +399,14 @@ fun HomeHubScreen(
                                         onClick = { onCycleCharacter(1) },
                                         modifier = Modifier
                                             .size(48.dp)
-                                            .background(Color(0xFF232A3B), CircleShape)
+                                            .background(palette.cardSurface, CircleShape)
+                                            .border(1.dp, palette.border, CircleShape)
                                             .testTag("next_fighter_button")
                                     ) {
                                         Icon(
                                             Icons.AutoMirrored.Filled.KeyboardArrowRight,
                                             contentDescription = "Next Fighter",
-                                            tint = Color(0xFFE8ECF4)
+                                            tint = palette.stageOnSurface
                                         )
                                     }
                                 }
@@ -393,27 +416,26 @@ fun HomeHubScreen(
                                 Text(
                                     text = activeCharacter.name,
                                     style = MaterialTheme.typography.displayMedium,
-                                    color = Color(0xFFF1F5F9)
+                                    color = palette.stageOnSurface
                                 )
                                 Text(
                                     text = "${activeCharacter.title} • ${activeCharacter.animeInspiration}",
                                     style = MaterialTheme.typography.bodyMedium,
-                                    color = Color(0xFF94A3B8)
+                                    color = palette.stageMuted
                                 )
                             }
                         }
 
                         Spacer(modifier = Modifier.height(12.dp))
 
-                        // Crisp 4-column upgraded tactical stat chips (HP, DMG, SPEED, ULT CD)
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            StatPillCard("MAX HP", "$effHp", Modifier.weight(1f))
+                            StatPillCard("HP", "$effHp", Modifier.weight(1f))
                             StatPillCard("POWER", "$effDmg", Modifier.weight(1f))
                             StatPillCard("SPEED", String.format(Locale.US, "%.2fx", activeCharacter.speedRating), Modifier.weight(1f))
-                            StatPillCard("ULT CD", String.format(Locale.US, "%.1fs", effCd), Modifier.weight(1f))
+                            StatPillCard("ULT WAIT", String.format(Locale.US, "%.1fs", effCd), Modifier.weight(1f))
                         }
 
                         Spacer(modifier = Modifier.height(10.dp))
@@ -430,7 +452,7 @@ fun HomeHubScreen(
                             Icon(Icons.Default.Bolt, contentDescription = null, tint = palette.goldAccent, modifier = Modifier.size(17.dp))
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                text = "Upgrade Health, Power & Lower CD • Recruit 220+ Fighters",
+                                text = "Upgrades & Fighter Shop",
                                 style = MaterialTheme.typography.labelLarge,
                                 color = palette.goldAccent,
                                 maxLines = 1,
@@ -477,7 +499,7 @@ fun HomeHubScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                text = "Combat Mode",
+                                text = "Game Mode",
                                 style = MaterialTheme.typography.titleLarge,
                                 color = palette.textPrimary
                             )
@@ -488,29 +510,46 @@ fun HomeHubScreen(
                             )
                         }
 
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            GameMode.entries.forEach { mode ->
-                                val selected = selectedMode == mode
-                                Surface(
-                                    onClick = { selectedMode = mode },
-                                    shape = RoundedCornerShape(12.dp),
-                                    color = if (selected) palette.blueAccentSoft else palette.elevatedSurface,
-                                    border = BorderStroke(1.dp, if (selected) palette.blueAccent else palette.border),
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .height(48.dp)
-                                        .testTag("mode_${mode.name.lowercase()}")
+                        val modeRows = remember { GameMode.entries.chunked(2) }
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            modeRows.forEach { rowModes ->
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
-                                    Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = 6.dp)) {
-                                        Text(
-                                            text = mode.title.substringBefore(" "),
-                                            style = MaterialTheme.typography.labelLarge,
-                                            color = if (selected) palette.blueAccent else palette.textPrimary,
-                                            maxLines = 1
-                                        )
+                                    rowModes.forEach { mode ->
+                                        val selected = selectedMode == mode
+                                        Surface(
+                                            onClick = { selectedMode = mode },
+                                            shape = RoundedCornerShape(12.dp),
+                                            color = if (selected) palette.blueAccentSoft else palette.elevatedSurface,
+                                            border = BorderStroke(1.dp, if (selected) palette.blueAccent else palette.border),
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .height(48.dp)
+                                                .testTag("mode_${mode.name.lowercase()}")
+                                        ) {
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                modifier = Modifier
+                                                    .fillMaxSize()
+                                                    .padding(horizontal = 12.dp)
+                                            ) {
+                                                Text(
+                                                    text = mode.title,
+                                                    style = MaterialTheme.typography.labelLarge,
+                                                    color = if (selected) palette.blueAccent else palette.textPrimary,
+                                                    maxLines = 1
+                                                )
+                                                Text(
+                                                    text = mode.tagLabel,
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = if (selected) palette.blueAccent else palette.textMuted,
+                                                    maxLines = 1
+                                                )
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -529,12 +568,17 @@ fun HomeHubScreen(
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
                                 Text(
-                                    text = "AI Tier",
+                                    text = "Bot",
                                     style = MaterialTheme.typography.labelMedium,
                                     color = palette.textSecondary
                                 )
                                 BotDifficulty.entries.forEach { diff ->
                                     val active = selectedDifficulty == diff
+                                    val diffLabel = when (diff) {
+                                        BotDifficulty.EASY -> "Easy"
+                                        BotDifficulty.MEDIUM -> "Normal • Hard"
+                                        BotDifficulty.HARD -> "Hard • Extreme"
+                                    }
                                     Surface(
                                         onClick = { onSelectDifficulty(diff) },
                                         shape = RoundedCornerShape(10.dp),
@@ -543,12 +587,15 @@ fun HomeHubScreen(
                                         modifier = Modifier
                                             .weight(1f)
                                             .height(48.dp)
+                                            .testTag("hub_diff_${diff.name.lowercase()}")
                                     ) {
-                                        Box(contentAlignment = Alignment.Center) {
+                                        Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = 4.dp)) {
                                             Text(
-                                                text = diff.title,
-                                                style = MaterialTheme.typography.labelMedium,
-                                                color = if (active) palette.goldAccent else palette.textSecondary
+                                                text = diffLabel,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = if (active) palette.goldAccent else palette.textSecondary,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
                                             )
                                         }
                                     }
@@ -556,8 +603,21 @@ fun HomeHubScreen(
                             }
                         }
 
+                        val actionLabel = when (selectedMode) {
+                            GameMode.PRACTICE_BOT -> "Play Now"
+                            GameMode.CUSTOM_MATCH -> "Open Custom Match"
+                            GameMode.MULTIPLAYER -> "Open LAN & Friend Lobby"
+                            GameMode.ONLINE_MATCH -> "Find Online Ranked Match"
+                        }
+
                         Button(
-                            onClick = { onStartBattle(selectedMode, selectedDifficulty) },
+                            onClick = {
+                                when (selectedMode) {
+                                    GameMode.CUSTOM_MATCH -> onNavigate(AppScreen.CUSTOM_MATCH)
+                                    GameMode.MULTIPLAYER -> onNavigate(AppScreen.MULTIPLAYER_LOBBY)
+                                    else -> onStartBattle(selectedMode, selectedDifficulty)
+                                }
+                            },
                             shape = RoundedCornerShape(15.dp),
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = palette.primaryAccent,
@@ -572,9 +632,11 @@ fun HomeHubScreen(
                             Icon(Icons.Default.PlayArrow, contentDescription = null)
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = "Launch Nonstop Clash",
+                                text = actionLabel,
                                 style = MaterialTheme.typography.titleLarge,
-                                color = Color.White
+                                color = Color.White,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
                     }
@@ -589,6 +651,7 @@ fun HomeHubScreen(
             selectedCharacterId = profile.selectedCharacterId,
             onSaveSettings = onSaveEngineSettings,
             onResetAccount = onResetAccount,
+            onSignOut = onSignOut,
             onDismiss = { showSettingsDialog = false }
         )
     }

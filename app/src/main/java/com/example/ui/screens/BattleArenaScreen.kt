@@ -98,30 +98,26 @@ fun BattleArenaScreen(
             .fillMaxSize()
             .background(palette.background)
             .systemBarsPadding()
-            .padding(horizontal = 12.dp, vertical = 8.dp)
+            .padding(horizontal = 8.dp, vertical = 4.dp)
             .testTag("battle_arena_screen"),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
+        verticalArrangement = Arrangement.spacedBy(5.dp)
     ) {
-        // 1. Symmetric Top Fighter HUD: Scaled MaxHP + Ultimate Progress & Cooldown Bars for BOTH Player and AI
-        ArenaTopHud(
+        // 1. Compact Fixed-Height VS Strip (Player HP/Ult vs Bot HP/Ult — zero mid-fight resize!)
+        ArenaCompactTopHud(
             playerName = simulation.playerBall.character.name,
             opponentName = simulation.opponentBall.character.name,
             hudState = hudState,
-            sfxEnabled = engineSettings.sfxEnabled,
-            palette = palette,
-            onToggleSfx = onToggleSfx,
-            onOpenSettings = { showSettings = true },
-            onSurrender = onSurrender
+            palette = palette
         )
 
-        // 2. High-Performance Isolated Playfield Court (60-120 FPS Canvas; zero parent recomposition)
+        // 2. Maximized Playfield Court (60–120 FPS isolated Canvas + floating overlays)
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f)
-                .clip(RoundedCornerShape(22.dp))
+                .clip(RoundedCornerShape(18.dp))
                 .background(palette.stageSurface)
-                .border(1.dp, palette.stageLine, RoundedCornerShape(22.dp))
+                .border(1.dp, palette.stageLine, RoundedCornerShape(18.dp))
         ) {
             ArenaCourtCanvas(
                 simulation = simulation,
@@ -133,25 +129,46 @@ fun BattleArenaScreen(
                 onPlayerLaunch = onPlayerLaunch
             )
 
-            // Opening Launch Prompt Overlay
+            // Floating compact impact toast (never shifts court layout!)
+            if (hudState.lastImpactBanner.isNotEmpty()) {
+                Surface(
+                    color = palette.overlaySurface,
+                    shape = RoundedCornerShape(50),
+                    border = BorderStroke(1.dp, palette.border),
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .padding(top = 6.dp)
+                ) {
+                    Text(
+                        text = hudState.lastImpactBanner,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = palette.textPrimary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp)
+                    )
+                }
+            }
+
+            // Compact Opening Shot Prompt
             if (turnState == TurnState.AIM_OPENING) {
                 Column(
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
-                        .padding(bottom = 18.dp),
+                        .padding(bottom = 14.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     Surface(
-                        color = Color(0xD90E121B),
+                        color = palette.overlaySurface,
                         shape = RoundedCornerShape(50),
-                        border = BorderStroke(1.dp, palette.stageLine)
+                        border = BorderStroke(1.dp, palette.border)
                     ) {
                         Text(
-                            text = "Drag anywhere to launch • Extended nonstop clash until 0 HP",
+                            text = "Drag to shoot • Bounces until 0 HP",
                             style = MaterialTheme.typography.labelMedium,
-                            color = Color(0xFFE2E8F0),
-                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
+                            color = palette.textPrimary,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp)
                         )
                     }
 
@@ -160,27 +177,31 @@ fun BattleArenaScreen(
                         shape = RoundedCornerShape(50),
                         colors = ButtonDefaults.buttonColors(
                             containerColor = palette.primaryAccent,
-                            contentColor = Color(0xFFF8FAFC)
+                            contentColor = Color.White
                         ),
-                        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 10.dp),
+                        contentPadding = PaddingValues(horizontal = 18.dp, vertical = 8.dp),
                         modifier = Modifier
                             .height(48.dp)
                             .testTag("quick_launch_button")
                     ) {
                         Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("Quick Launch Clash", style = MaterialTheme.typography.labelLarge)
+                        Spacer(modifier = Modifier.width(5.dp))
+                        Text("Start Fight", style = MaterialTheme.typography.labelLarge)
                     }
                 }
             }
         }
 
-        // 3. Bottom Tactical Bar (Redirect + Player Ultimate Progress/Cooldown Action Button)
-        ArenaBottomBar(
+        // 3. Single Compact 48dp Bottom Action Row (Exit, Sound, Settings, Dash, Ultimate)
+        ArenaCompactBottomBar(
             ultimateName = simulation.playerBall.character.ultimateName,
             hudState = hudState,
             turnState = turnState,
+            sfxEnabled = engineSettings.sfxEnabled,
             palette = palette,
+            onSurrender = onSurrender,
+            onToggleSfx = onToggleSfx,
+            onOpenSettings = { showSettings = true },
             onTriggerUltimate = onTriggerUltimate
         )
     }
@@ -196,119 +217,71 @@ fun BattleArenaScreen(
 }
 
 @Composable
-private fun ArenaTopHud(
+private fun ArenaCompactTopHud(
     playerName: String,
     opponentName: String,
     hudState: BattleHudState,
-    sfxEnabled: Boolean,
-    palette: AppPalette,
-    onToggleSfx: () -> Unit,
-    onOpenSettings: () -> Unit,
-    onSurrender: () -> Unit
+    palette: AppPalette
 ) {
     Surface(
         color = palette.cardSurface,
-        shape = RoundedCornerShape(18.dp),
+        shape = RoundedCornerShape(14.dp),
         border = BorderStroke(1.dp, palette.border),
         modifier = Modifier.fillMaxWidth()
     ) {
-        Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 10.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 10.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            FighterHudColumn(
+                name = playerName,
+                hp = hudState.playerHp,
+                maxHp = hudState.playerMaxHp,
+                hpColor = palette.greenAccent,
+                ultPercent = hudState.playerUltPercent,
+                isUltActive = hudState.isPlayerUltActive,
+                ultActiveHalfSecs = hudState.playerUltActiveHalfSecs,
+                ultCooldownHalfSecs = hudState.playerUltCooldownHalfSecs,
+                ultMaxDurationSec = hudState.playerUltMaxDurationSec,
+                ultMaxCooldownSec = hudState.playerUltMaxCooldownSec,
+                palette = palette,
+                alignRight = false,
+                testTagPrefix = "player",
+                modifier = Modifier.weight(1f)
+            )
+
+            Surface(
+                color = palette.elevatedSurface,
+                shape = RoundedCornerShape(8.dp),
+                border = BorderStroke(1.dp, palette.border)
             ) {
-                // Player Fighter Column (HP + Ultimate Progress/Cooldown Bar)
-                FighterHudColumn(
-                    name = playerName,
-                    hp = hudState.playerHp,
-                    maxHp = hudState.playerMaxHp,
-                    hpColor = palette.greenAccent,
-                    ultPercent = hudState.playerUltPercent,
-                    isUltActive = hudState.isPlayerUltActive,
-                    ultActiveHalfSecs = hudState.playerUltActiveHalfSecs,
-                    ultCooldownHalfSecs = hudState.playerUltCooldownHalfSecs,
-                    ultMaxDurationSec = hudState.playerUltMaxDurationSec,
-                    ultMaxCooldownSec = hudState.playerUltMaxCooldownSec,
-                    palette = palette,
-                    alignRight = false,
-                    testTagPrefix = "player",
-                    modifier = Modifier.weight(1f)
-                )
-
-                // Compact 48dp accessible controls cluster (SFX + Settings + Surrender)
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(
-                        onClick = onToggleSfx,
-                        modifier = Modifier
-                            .size(48.dp)
-                            .testTag("arena_sfx_toggle_button")
-                    ) {
-                        Icon(
-                            imageVector = if (sfxEnabled) Icons.AutoMirrored.Outlined.VolumeUp else Icons.AutoMirrored.Outlined.VolumeOff,
-                            contentDescription = if (sfxEnabled) "Mute Sound Effects" else "Enable Sound Effects",
-                            tint = if (sfxEnabled) palette.blueAccent else palette.textMuted,
-                            modifier = Modifier.size(19.dp)
-                        )
-                    }
-                    IconButton(
-                        onClick = onOpenSettings,
-                        modifier = Modifier
-                            .size(48.dp)
-                            .testTag("arena_settings_button")
-                    ) {
-                        Icon(
-                            Icons.Outlined.Tune,
-                            contentDescription = "Engine & Theme Settings",
-                            tint = palette.textSecondary,
-                            modifier = Modifier.size(19.dp)
-                        )
-                    }
-                    IconButton(
-                        onClick = onSurrender,
-                        modifier = Modifier
-                            .size(48.dp)
-                            .testTag("surrender_button")
-                    ) {
-                        Icon(
-                            Icons.Default.Close,
-                            contentDescription = "Leave Match",
-                            tint = palette.textSecondary,
-                            modifier = Modifier.size(19.dp)
-                        )
-                    }
-                }
-
-                // AI Opponent Fighter Column (HP + AI Ultimate Progress/Cooldown Bar)
-                FighterHudColumn(
-                    name = opponentName,
-                    hp = hudState.opponentHp,
-                    maxHp = hudState.opponentMaxHp,
-                    hpColor = palette.primaryAccent,
-                    ultPercent = hudState.opponentUltPercent,
-                    isUltActive = hudState.isOpponentUltActive,
-                    ultActiveHalfSecs = hudState.opponentUltActiveHalfSecs,
-                    ultCooldownHalfSecs = hudState.opponentUltCooldownHalfSecs,
-                    ultMaxDurationSec = hudState.opponentUltMaxDurationSec,
-                    ultMaxCooldownSec = hudState.opponentUltMaxCooldownSec,
-                    palette = palette,
-                    alignRight = true,
-                    testTagPrefix = "opponent",
-                    modifier = Modifier.weight(1f)
-                )
-            }
-
-            if (hudState.lastImpactBanner.isNotEmpty()) {
-                Spacer(modifier = Modifier.height(6.dp))
                 Text(
-                    text = hudState.lastImpactBanner,
+                    text = "VS",
                     style = MaterialTheme.typography.labelSmall,
                     color = palette.textSecondary,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.align(Alignment.CenterHorizontally)
+                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
                 )
             }
+
+            FighterHudColumn(
+                name = opponentName,
+                hp = hudState.opponentHp,
+                maxHp = hudState.opponentMaxHp,
+                hpColor = palette.primaryAccent,
+                ultPercent = hudState.opponentUltPercent,
+                isUltActive = hudState.isOpponentUltActive,
+                ultActiveHalfSecs = hudState.opponentUltActiveHalfSecs,
+                ultCooldownHalfSecs = hudState.opponentUltCooldownHalfSecs,
+                ultMaxDurationSec = hudState.opponentUltMaxDurationSec,
+                ultMaxCooldownSec = hudState.opponentUltMaxCooldownSec,
+                palette = palette,
+                alignRight = true,
+                testTagPrefix = "opponent",
+                modifier = Modifier.weight(1f)
+            )
         }
     }
 }
@@ -347,15 +320,15 @@ private fun FighterHudColumn(
     }
 
     val ultStatusLabel = when {
-        isUltActive -> "AWAKEN ${ultActiveHalfSecs / 2f}s"
-        isOnCooldown -> "CD ${ultCooldownHalfSecs / 2f}s"
-        isReady -> "ULT READY!"
-        else -> "ULT $ultPercent%"
+        isUltActive -> "ON ${ultActiveHalfSecs / 2f}s"
+        isOnCooldown -> "WAIT ${ultCooldownHalfSecs / 2f}s"
+        isReady -> "READY!"
+        else -> "$ultPercent%"
     }
 
     val hpRatio = (hp.toFloat() / maxHp.coerceAtLeast(1)).coerceIn(0f, 1f)
 
-    Column(modifier = modifier) {
+    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(3.dp)) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -364,7 +337,7 @@ private fun FighterHudColumn(
             if (!alignRight) {
                 Text(
                     text = name,
-                    style = MaterialTheme.typography.titleMedium,
+                    style = MaterialTheme.typography.labelLarge,
                     color = palette.textPrimary,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -373,19 +346,19 @@ private fun FighterHudColumn(
                 Spacer(modifier = Modifier.width(4.dp))
                 Text(
                     text = "$hp",
-                    style = MaterialTheme.typography.labelLarge,
+                    style = MaterialTheme.typography.labelMedium,
                     color = hpColor
                 )
             } else {
                 Text(
                     text = "$hp",
-                    style = MaterialTheme.typography.labelLarge,
+                    style = MaterialTheme.typography.labelMedium,
                     color = hpColor
                 )
                 Spacer(modifier = Modifier.width(4.dp))
                 Text(
                     text = name,
-                    style = MaterialTheme.typography.titleMedium,
+                    style = MaterialTheme.typography.labelLarge,
                     color = palette.textPrimary,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -394,40 +367,35 @@ private fun FighterHudColumn(
             }
         }
 
-        Spacer(modifier = Modifier.height(4.dp))
-
         LinearProgressIndicator(
             progress = { hpRatio },
             modifier = Modifier
                 .fillMaxWidth()
-                .height(9.dp)
+                .height(6.dp)
                 .clip(RoundedCornerShape(50)),
             color = hpColor,
             trackColor = palette.elevatedSurface
         )
 
-        Spacer(modifier = Modifier.height(5.dp))
-
-        // Symmetric Ultimate Progress / Active / Cooldown Bar
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .testTag("${testTagPrefix}_ult_bar_row"),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp)
+            horizontalArrangement = Arrangement.spacedBy(3.dp)
         ) {
             if (!alignRight) {
                 Icon(
                     Icons.Default.Bolt,
                     contentDescription = null,
                     tint = ultBarColor,
-                    modifier = Modifier.size(12.dp)
+                    modifier = Modifier.size(11.dp)
                 )
                 LinearProgressIndicator(
                     progress = { ultProgress },
                     modifier = Modifier
                         .weight(1f)
-                        .height(5.dp)
+                        .height(4.dp)
                         .clip(RoundedCornerShape(50)),
                     color = ultBarColor,
                     trackColor = palette.elevatedSurface
@@ -449,7 +417,7 @@ private fun FighterHudColumn(
                     progress = { ultProgress },
                     modifier = Modifier
                         .weight(1f)
-                        .height(5.dp)
+                        .height(4.dp)
                         .clip(RoundedCornerShape(50)),
                     color = ultBarColor,
                     trackColor = palette.elevatedSurface
@@ -458,7 +426,7 @@ private fun FighterHudColumn(
                     Icons.Default.Bolt,
                     contentDescription = null,
                     tint = ultBarColor,
-                    modifier = Modifier.size(12.dp)
+                    modifier = Modifier.size(11.dp)
                 )
             }
         }
@@ -561,52 +529,52 @@ private fun ArenaCourtCanvas(
                 color = palette.stageLine,
                 topLeft = Offset(pad, pad),
                 size = Size(courtW, courtH),
-                cornerRadius = CornerRadius(24f, 24f),
-                style = Stroke(width = 3f)
+                cornerRadius = CornerRadius(20f, 20f),
+                style = Stroke(width = 2.6f)
             )
             val midY = size.height * 0.5f
             drawLine(
                 color = palette.stageLine,
-                start = Offset(pad + 12f, midY),
-                end = Offset(size.width - pad - 12f, midY),
-                strokeWidth = 2f
+                start = Offset(pad + 10f, midY),
+                end = Offset(size.width - pad - 10f, midY),
+                strokeWidth = 1.8f
             )
             drawCircle(
                 color = palette.stageLine,
-                radius = size.minDimension * 0.16f,
+                radius = size.minDimension * 0.15f,
                 center = Offset(size.width * 0.5f, midY),
-                style = Stroke(width = 2f)
+                style = Stroke(width = 1.8f)
             )
 
             if (simulation.wallFlashLeft > 0.02f) {
                 drawLine(
                     color = palette.blueAccent.copy(alpha = simulation.wallFlashLeft),
-                    start = Offset(pad, pad + 20f),
-                    end = Offset(pad, size.height - pad - 20f),
+                    start = Offset(pad, pad + 18f),
+                    end = Offset(pad, size.height - pad - 18f),
                     strokeWidth = 6f
                 )
             }
             if (simulation.wallFlashRight > 0.02f) {
                 drawLine(
                     color = palette.blueAccent.copy(alpha = simulation.wallFlashRight),
-                    start = Offset(size.width - pad, pad + 20f),
-                    end = Offset(size.width - pad, size.height - pad - 20f),
+                    start = Offset(size.width - pad, pad + 18f),
+                    end = Offset(size.width - pad, size.height - pad - 18f),
                     strokeWidth = 6f
                 )
             }
             if (simulation.wallFlashTop > 0.02f) {
                 drawLine(
                     color = palette.primaryAccent.copy(alpha = simulation.wallFlashTop),
-                    start = Offset(pad + 20f, pad),
-                    end = Offset(size.width - pad - 20f, pad),
+                    start = Offset(pad + 18f, pad),
+                    end = Offset(size.width - pad - 18f, pad),
                     strokeWidth = 6f
                 )
             }
             if (simulation.wallFlashBottom > 0.02f) {
                 drawLine(
                     color = palette.greenAccent.copy(alpha = simulation.wallFlashBottom),
-                    start = Offset(pad + 20f, size.height - pad),
-                    end = Offset(size.width - pad - 20f, size.height - pad),
+                    start = Offset(pad + 18f, size.height - pad),
+                    end = Offset(size.width - pad - 18f, size.height - pad),
                     strokeWidth = 6f
                 )
             }
@@ -618,7 +586,8 @@ private fun ArenaCourtCanvas(
                     scope = this,
                     ballPosition = simulation.playerBall.position,
                     ballRadius = simulation.playerBall.radius,
-                    globalTime = simulation.globalTime
+                    globalTime = simulation.globalTime,
+                    reticleColor = palette.aimReticle
                 )
             }
 
@@ -635,7 +604,8 @@ private fun ArenaCourtCanvas(
                     wallTop = simulation.wallTop,
                     wallBottom = simulation.wallBottom,
                     ballRadius = simulation.playerBall.radius,
-                    isRedirectAim = turnState == TurnState.NONSTOP_CLASH
+                    isRedirectAim = turnState == TurnState.NONSTOP_CLASH,
+                    reticleColor = palette.aimReticle
                 )
             }
 
@@ -655,7 +625,7 @@ private fun ArenaCourtCanvas(
             )
 
             drawCircle(
-                color = Color(0xFF3CC27B).copy(alpha = 0.55f),
+                color = palette.greenAccent.copy(alpha = 0.55f),
                 radius = simulation.playerBall.radius * 1.12f,
                 center = Offset(simulation.playerBall.position.x, simulation.playerBall.position.y),
                 style = Stroke(width = 2f)
@@ -668,18 +638,24 @@ private fun ArenaCourtCanvas(
                 floatingTexts = simulation.floatingTexts,
                 textMeasurer = textMeasurer,
                 displayFont = TacticalFontFamily,
-                renderMode = engineSettings.renderMode
+                renderMode = engineSettings.renderMode,
+                defaultTextColor = palette.damageTextDefault,
+                isDarkStage = palette.isDark
             )
         }
     }
 }
 
 @Composable
-private fun ArenaBottomBar(
+private fun ArenaCompactBottomBar(
     ultimateName: String,
     hudState: BattleHudState,
     turnState: TurnState,
+    sfxEnabled: Boolean,
     palette: AppPalette,
+    onSurrender: () -> Unit,
+    onToggleSfx: () -> Unit,
+    onOpenSettings: () -> Unit,
     onTriggerUltimate: () -> Unit
 ) {
     val isPlayerOnCd = hudState.playerUltCooldownHalfSecs > 0
@@ -693,60 +669,114 @@ private fun ArenaBottomBar(
 
     Row(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Tactical Redirect Indicator Pill
+        // Exit button (48dp touch target)
         Surface(
             color = palette.cardSurface,
-            shape = RoundedCornerShape(16.dp),
+            shape = RoundedCornerShape(12.dp),
+            border = BorderStroke(1.dp, palette.border),
+            modifier = Modifier.size(48.dp)
+        ) {
+            IconButton(
+                onClick = onSurrender,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .testTag("surrender_button")
+            ) {
+                Icon(
+                    Icons.Default.Close,
+                    contentDescription = "Exit Match",
+                    tint = palette.textSecondary,
+                    modifier = Modifier.size(19.dp)
+                )
+            }
+        }
+
+        // Sound toggle (48dp touch target)
+        Surface(
+            color = palette.cardSurface,
+            shape = RoundedCornerShape(12.dp),
+            border = BorderStroke(1.dp, palette.border),
+            modifier = Modifier.size(48.dp)
+        ) {
+            IconButton(
+                onClick = onToggleSfx,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .testTag("arena_sfx_toggle_button")
+            ) {
+                Icon(
+                    imageVector = if (sfxEnabled) Icons.AutoMirrored.Outlined.VolumeUp else Icons.AutoMirrored.Outlined.VolumeOff,
+                    contentDescription = if (sfxEnabled) "Mute Sound" else "Turn On Sound",
+                    tint = if (sfxEnabled) palette.blueAccent else palette.textMuted,
+                    modifier = Modifier.size(19.dp)
+                )
+            }
+        }
+
+        // Settings button (48dp touch target)
+        Surface(
+            color = palette.cardSurface,
+            shape = RoundedCornerShape(12.dp),
+            border = BorderStroke(1.dp, palette.border),
+            modifier = Modifier.size(48.dp)
+        ) {
+            IconButton(
+                onClick = onOpenSettings,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .testTag("arena_settings_button")
+            ) {
+                Icon(
+                    Icons.Outlined.Tune,
+                    contentDescription = "Settings",
+                    tint = palette.textSecondary,
+                    modifier = Modifier.size(19.dp)
+                )
+            }
+        }
+
+        // Compact Dash indicator pill
+        Surface(
+            color = palette.cardSurface,
+            shape = RoundedCornerShape(12.dp),
             border = BorderStroke(
                 1.dp,
                 if (hudState.redirectReady && turnState == TurnState.NONSTOP_CLASH) palette.blueAccent else palette.border
             ),
-            modifier = Modifier
-                .weight(0.95f)
-                .height(56.dp)
+            modifier = Modifier.height(48.dp)
         ) {
             Row(
-                modifier = Modifier.padding(horizontal = 12.dp),
+                modifier = Modifier.padding(horizontal = 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.spacedBy(5.dp)
             ) {
                 Box(
                     modifier = Modifier
-                        .size(10.dp)
+                        .size(8.dp)
                         .clip(CircleShape)
                         .background(if (hudState.redirectReady) palette.blueAccent else palette.textMuted)
                 )
-                Column {
-                    Text(
-                        text = if (turnState == TurnState.AIM_OPENING) {
-                            "Aim Opening Shot"
-                        } else if (hudState.redirectReady) {
-                            "Redirect Ready"
-                        } else {
-                            "Redirect ${(hudState.redirectHalfSecsLeft / 2f)}s"
-                        },
-                        style = MaterialTheme.typography.labelLarge,
-                        color = palette.textPrimary,
-                        maxLines = 1
-                    )
-                    Text(
-                        text = "Drag court to curve",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = palette.textSecondary,
-                        maxLines = 1
-                    )
-                }
+                Text(
+                    text = when {
+                        turnState == TurnState.AIM_OPENING -> "Aim"
+                        hudState.redirectReady -> "Dash"
+                        else -> "${hudState.redirectHalfSecsLeft / 2f}s"
+                    },
+                    style = MaterialTheme.typography.labelMedium,
+                    color = palette.textPrimary,
+                    maxLines = 1
+                )
             }
         }
 
-        // Player Ultimate Awakening Button with embedded Progress & Cooldown Bar
+        // Compact Ultimate Button (48dp height)
         Surface(
             onClick = { if (ultReady) onTriggerUltimate() },
             enabled = ultReady,
-            shape = RoundedCornerShape(16.dp),
+            shape = RoundedCornerShape(12.dp),
             color = when {
                 hudState.isPlayerUltActive -> palette.goldAccentSoft
                 ultReady -> palette.primaryAccent
@@ -761,14 +791,14 @@ private fun ArenaBottomBar(
                 }
             ),
             modifier = Modifier
-                .weight(1.30f)
-                .height(56.dp)
+                .weight(1f)
+                .height(48.dp)
                 .testTag("ultimate_awaken_button")
         ) {
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(horizontal = 12.dp, vertical = 7.dp),
+                    .padding(horizontal = 10.dp, vertical = 6.dp),
                 verticalArrangement = Arrangement.SpaceBetween
             ) {
                 Row(
@@ -785,17 +815,17 @@ private fun ArenaBottomBar(
                             isPlayerOnCd -> palette.textMuted
                             else -> palette.goldAccent
                         },
-                        modifier = Modifier.size(17.dp)
+                        modifier = Modifier.size(15.dp)
                     )
-                    Spacer(modifier = Modifier.width(5.dp))
+                    Spacer(modifier = Modifier.width(3.dp))
                     Text(
                         text = when {
-                            hudState.isPlayerUltActive -> "AWAKENED • ${hudState.playerUltActiveHalfSecs / 2f}s"
-                            isPlayerOnCd -> "COOLDOWN • ${hudState.playerUltCooldownHalfSecs / 2f}s"
-                            ultReady -> "AWAKEN: $ultimateName"
-                            else -> "Ultimate ${hudState.playerUltPercent}%"
+                            hudState.isPlayerUltActive -> "ULT ${hudState.playerUltActiveHalfSecs / 2f}s"
+                            isPlayerOnCd -> "WAIT ${hudState.playerUltCooldownHalfSecs / 2f}s"
+                            ultReady -> "ULT: $ultimateName"
+                            else -> "Ult ${hudState.playerUltPercent}%"
                         },
-                        style = MaterialTheme.typography.labelLarge,
+                        style = MaterialTheme.typography.labelMedium,
                         color = when {
                             ultReady -> Color.White
                             hudState.isPlayerUltActive -> palette.goldAccent
@@ -811,7 +841,7 @@ private fun ArenaBottomBar(
                     progress = { bottomProgress },
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(5.dp)
+                        .height(4.dp)
                         .clip(RoundedCornerShape(50)),
                     color = when {
                         ultReady -> Color.White

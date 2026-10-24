@@ -1,40 +1,71 @@
 package com.example.model
 
 enum class AppThemeMode(val title: String, val subtitle: String) {
-    DARK("Dark", "Matte Slate"),
-    LIGHT("Light", "Warm Stone"),
-    SYSTEM("System", "Match Device")
+    DARK("Dark", "Night"),
+    LIGHT("Light", "Day"),
+    SYSTEM("Auto", "Device")
 }
 
 enum class RenderMode(
     val title: String,
     val subtitle: String,
     val description: String,
-    val particleCountOnHit: Int
+    val particleCountOnHit: Int,
+    val maxParticles: Int,
+    val maxShockwaves: Int,
+    val maxTrailNodes: Int,
+    val ambientAuraFx: Boolean,
+    val bloomGlow: Boolean
 ) {
     PIXELIZED(
-        title = "Retro",
-        subtitle = "Minimal FX",
-        description = "Pixel sparks and zero motion trails for maximum battery efficiency.",
-        particleCountOnHit = 6
+        title = "Low",
+        subtitle = "Fast",
+        description = "Simple pixel sparks and no trails to save battery.",
+        particleCountOnHit = 6,
+        maxParticles = 24,
+        maxShockwaves = 4,
+        maxTrailNodes = 0,
+        ambientAuraFx = false,
+        bloomGlow = false
     ),
     BALANCED(
-        title = "Balanced",
-        subtitle = "Native 60 FPS",
-        description = "Crisp cel-shaded outlines, subtle speed trails, and clean collision bursts.",
-        particleCountOnHit = 12
+        title = "Medium",
+        subtitle = "Smooth",
+        description = "Clean outlines, short speed trails, and smooth sparks.",
+        particleCountOnHit = 12,
+        maxParticles = 48,
+        maxShockwaves = 8,
+        maxTrailNodes = 5,
+        ambientAuraFx = true,
+        bloomGlow = false
     ),
     REALISTIC(
+        title = "High",
+        subtitle = "Detailed",
+        description = "Longer trails, glowing auras, and elemental sparks.",
+        particleCountOnHit = 18,
+        maxParticles = 72,
+        maxShockwaves = 12,
+        maxTrailNodes = 7,
+        ambientAuraFx = true,
+        bloomGlow = true
+    ),
+    ULTRA(
         title = "Ultra",
-        subtitle = "High FX",
-        description = "Extended speed afterimages and richer arena collision sparks.",
-        particleCountOnHit = 22
+        subtitle = "Max FX",
+        description = "Full weapon trails, dense sparks, aura lightning, and glow.",
+        particleCountOnHit = 26,
+        maxParticles = 96,
+        maxShockwaves = 16,
+        maxTrailNodes = 10,
+        ambientAuraFx = true,
+        bloomGlow = true
     )
 }
 
 enum class PhysicsMesh(val title: String, val description: String) {
-    SIMPLE("Rigid", "Clean sphere geometry with zero impact squash deformation."),
-    DYNAMIC("Elastic", "Responsive impact squash-and-stretch with locked anime details.")
+    SIMPLE("Solid", "Balls keep a firm round shape on hits."),
+    DYNAMIC("Bouncy", "Balls squash and stretch on fast hits.")
 }
 
 enum class TargetFPS(val fps: Int, val label: String) {

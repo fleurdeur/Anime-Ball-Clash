@@ -1,3 +1,28 @@
 <resources>
     <string name="app_name">Anime Ball Clash</string>
+    <string name="nav_play">Play</string>
+    <string name="nav_fighters">Fighters</string>
+    <string name="nav_shop">Shop</string>
+    <string name="nav_quests">Quests</string>
+    <string name="nav_ranks">Ranks</string>
+    <string name="play_now">Play Now</string>
+    <string name="start_fight">Start Fight</string>
+    <string name="drag_to_shoot">Drag anywhere to shoot</string>
+    <string name="settings_title">Settings</string>
+    <string name="theme_label">Theme</string>
+    <string name="graphics_label">Graphics</string>
+    <string name="bounce_feel_label">Bounce Feel</string>
+    <string name="frame_rate_label">Frame Rate</string>
+    <string name="sound_label">Sound</string>
+    <string name="vibration_label">Vibration</string>
+    <string name="screen_shake_label">Screen Shake</string>
+    <string name="done_label">Done</string>
+    <string name="reset_progress">Reset Progress</string>
+    <string name="tap_again_to_reset">Tap Again to Reset</string>
+    <string name="sign_in_with_google">Sign in with Google</string>
+    <string name="sign_out">Sign Out</string>
+    <string name="custom_play_title">Custom Match</string>
+    <string name="multiplayer_lobby_title">VS Friend</string>
+    <string name="lan_wifi_tab">LAN Wi-Fi</string>
+    <string name="online_room_tab">Room Code</string>
 </resources>

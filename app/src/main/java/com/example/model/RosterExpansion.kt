@@ -81,9 +81,9 @@ object RosterExpansion {
             CharacterAlignment.PROTAGONIST, AnimeTier.CULT, CharacterClass.ATTACKER, ElementTag.SLASH,
             425, 16, 1.26f, 1.82f, 0xFF18181B, 0xFF7F1D1D, 0xFFDC2626, 0xFF09090B,
             WeaponVisualType.GRIMOIRE_GREATSWORD,
-            PassiveArchetype.BERSERKER_RAGE, "Struggler's Wrath", "Deals up to +45% bonus Dragonslayer damage as HP drops lower.",
-            UltimateArchetype.HYPER_AWAKEN, "Berserker Armor Unbound", 6.0f, 9.0f, 1.72f,
-            "Beast of Darkness takes control—ignoring pain with +32% speed and 1.72x cleave.",
+            PassiveArchetype.BERSERKER_RAGE, "Struggler's Rage", "Hits up to 45% harder with his heavy iron sword as his HP gets low.",
+            UltimateArchetype.HYPER_AWAKEN, "Berserker Armor", 6.0f, 9.0f, 1.72f,
+            "Dons the Berserker wolf helm and grows his Dragon Slayer sword huge (+32% speed, wider reach, 1.72x damage).",
             "If you meet God in my way, tell Him to leave me alone!", 68_000, cape = true
         ),
         // 32. Griffith / Femto

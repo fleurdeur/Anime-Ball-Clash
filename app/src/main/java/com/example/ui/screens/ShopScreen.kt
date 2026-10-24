@@ -140,15 +140,15 @@ fun ShopScreen(
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = if (selectedTab == 0) "Fighter Unlock" else "Upgrade Forge",
+                            text = if (selectedTab == 0) "Shop" else "Upgrades",
                             style = MaterialTheme.typography.displayMedium,
                             color = palette.textPrimary
                         )
                         Text(
                             text = if (selectedTab == 0) {
-                                "Recruit ${CharacterRoster.characters.size - 4} heroes & villains"
+                                "Unlock ${CharacterRoster.characters.size - 4} heroes & villains"
                             } else {
-                                "Boost Health, Power & Lower CD for owned fighters"
+                                "Upgrade Health, Power & Faster Ult"
                             },
                             style = MaterialTheme.typography.bodyMedium,
                             color = palette.textSecondary
@@ -173,13 +173,12 @@ fun ShopScreen(
 
                 Spacer(modifier = Modifier.height(10.dp))
 
-                // Dual Shop Mode Switcher: Recruit vs Upgrades
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     ShopTabPill(
-                        label = "Recruit (${CharacterRoster.characters.size - 4})",
+                        label = "Fighters (${CharacterRoster.characters.size - 4})",
                         active = selectedTab == 0,
                         testTag = "shop_tab_recruit",
                         modifier = Modifier.weight(1f),
@@ -201,7 +200,7 @@ fun ShopScreen(
                         value = searchQuery,
                         onValueChange = { searchQuery = it },
                         singleLine = true,
-                        placeholder = { Text("Search anime series or character...", color = palette.textMuted) },
+                        placeholder = { Text("Search fighter or anime...", color = palette.textMuted) },
                         leadingIcon = {
                             Icon(Icons.Outlined.Search, contentDescription = null, tint = palette.textSecondary)
                         },
@@ -226,7 +225,11 @@ fun ShopScreen(
                         verticalArrangement = Arrangement.spacedBy(10.dp),
                         modifier = Modifier.weight(1f)
                     ) {
-                        items(items = sortedRecruits, key = { it.id }) { character ->
+                        items(
+                            items = sortedRecruits,
+                            key = { it.id },
+                            contentType = { "shop_recruit_card" }
+                        ) { character ->
                             val isUnlocked = unlockedIds.contains(character.id)
                             val canAfford = profile.gold >= character.unlockCostGold
                             val isVillain = character.alignment == CharacterAlignment.ANTAGONIST
@@ -313,7 +316,7 @@ fun ShopScreen(
                                             shape = RoundedCornerShape(12.dp),
                                             colors = ButtonDefaults.buttonColors(
                                                 containerColor = palette.goldAccent,
-                                                contentColor = Color(0xFF14161C),
+                                                contentColor = if (palette.isDark) Color(0xFF14161C) else Color.White,
                                                 disabledContainerColor = palette.elevatedSurface,
                                                 disabledContentColor = palette.textMuted
                                             ),
@@ -337,7 +340,11 @@ fun ShopScreen(
                         verticalArrangement = Arrangement.spacedBy(12.dp),
                         modifier = Modifier.weight(1f)
                     ) {
-                        items(items = unlockedRoster, key = { "upg_${it.id}" }) { character ->
+                        items(
+                            items = unlockedRoster,
+                            key = { "upg_${it.id}" },
+                            contentType = { "shop_upgrade_card" }
+                        ) { character ->
                             val upg = characterUpgrades[character.id] ?: CharacterUpgradeState()
                             val effHp = upg.effectiveMaxHp(character.maxHp)
                             val effDmg = upg.effectiveBaseDamage(character.baseDamage)
@@ -405,7 +412,7 @@ fun ShopScreen(
                                     UpgradeTrackRow(
                                         icon = Icons.Default.Favorite,
                                         accent = palette.greenAccent,
-                                        title = "Vitality Core (+35 HP)",
+                                        title = "Health (+35 HP)",
                                         currentLevel = upg.healthLevel,
                                         statPreview = "$effHp HP",
                                         costGold = upg.nextCostGold(UpgradeStatType.HEALTH),
@@ -417,7 +424,7 @@ fun ShopScreen(
                                     UpgradeTrackRow(
                                         icon = Icons.Default.Bolt,
                                         accent = palette.primaryAccent,
-                                        title = "Attack Force (+2 DMG)",
+                                        title = "Power (+2 DMG)",
                                         currentLevel = upg.powerLevel,
                                         statPreview = "$effDmg DMG",
                                         costGold = upg.nextCostGold(UpgradeStatType.POWER),
@@ -429,9 +436,9 @@ fun ShopScreen(
                                     UpgradeTrackRow(
                                         icon = Icons.Default.Speed,
                                         accent = palette.blueAccent,
-                                        title = "Chrono Drive (-0.45s CD)",
+                                        title = "Faster Ult (-0.45s)",
                                         currentLevel = upg.cooldownLevel,
-                                        statPreview = String.format(Locale.US, "%.1fs CD", effCd),
+                                        statPreview = String.format(Locale.US, "%.1fs", effCd),
                                         costGold = upg.nextCostGold(UpgradeStatType.COOLDOWN),
                                         playerGold = profile.gold,
                                         testTag = "shop_upgrade_cd_${character.id}",

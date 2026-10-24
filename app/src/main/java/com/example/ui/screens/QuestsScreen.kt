@@ -78,12 +78,12 @@ fun QuestsScreen(
                 Spacer(modifier = Modifier.height(12.dp))
 
                 Text(
-                    text = "Missions",
+                    text = "Quests",
                     style = MaterialTheme.typography.displayMedium,
                     color = palette.textPrimary
                 )
                 Text(
-                    text = "Complete arena milestones to fund new anime fighters",
+                    text = "Finish goals to earn Gold for new fighters",
                     style = MaterialTheme.typography.bodyMedium,
                     color = palette.textSecondary
                 )
@@ -95,7 +95,11 @@ fun QuestsScreen(
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                     modifier = Modifier.weight(1f)
                 ) {
-                    items(items = quests, key = { it.id }) { quest ->
+                    items(
+                        items = quests,
+                        key = { it.id },
+                        contentType = { "quest_card" }
+                    ) { quest ->
                         val isComplete = quest.currentProgress >= quest.targetProgress
                         val progressRatio = (quest.currentProgress.toFloat() / quest.targetProgress.coerceAtLeast(1)).coerceIn(0f, 1f)
 

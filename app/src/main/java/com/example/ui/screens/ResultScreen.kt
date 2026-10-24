@@ -4,6 +4,7 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -89,7 +90,7 @@ fun ResultScreen(
                 border = BorderStroke(1.dp, bannerFg.copy(alpha = 0.35f))
             ) {
                 Text(
-                    text = if (stats.isPlayerWinner) "KNOCKOUT VICTORY" else "DEFEATED",
+                    text = if (stats.isPlayerWinner) "YOU WIN!" else "YOU LOSE",
                     style = MaterialTheme.typography.labelLarge,
                     color = bannerFg,
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
@@ -100,7 +101,8 @@ fun ResultScreen(
                 modifier = Modifier
                     .size(118.dp)
                     .clip(CircleShape)
-                    .background(palette.stageSurface),
+                    .background(palette.stageSurface)
+                    .border(1.dp, palette.stageLine, CircleShape),
                 contentAlignment = Alignment.Center
             ) {
                 Canvas(modifier = Modifier.size(104.dp)) {
@@ -131,17 +133,17 @@ fun ResultScreen(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(modifier = Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text("Match Rewards", style = MaterialTheme.typography.titleLarge, color = palette.textPrimary)
+                    Text("Rewards", style = MaterialTheme.typography.titleLarge, color = palette.textPrimary)
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        RewardChip("+${formatGold(stats.goldEarned)} Gold", palette.goldAccentSoft, palette.goldAccent, Modifier.weight(1f))
+                        RewardChip("+${formatGold(stats.goldEarned)} G", palette.goldAccentSoft, palette.goldAccent, Modifier.weight(1f))
                         RewardChip("+${stats.gemsEarned} Gems", palette.blueAccentSoft, palette.blueAccent, Modifier.weight(1f))
                         RewardChip("+${stats.expEarned} XP", palette.elevatedSurface, palette.textPrimary, Modifier.weight(1f))
                     }
                     Text(
-                        text = "Balance: ${formatGold(profile.gold)} Gold • Lv.${profile.level} (${profile.exp}/${profile.maxExp} XP)",
+                        text = "Gold: ${formatGold(profile.gold)} G • Lv.${profile.level} (${profile.exp}/${profile.maxExp} XP)",
                         style = MaterialTheme.typography.labelMedium,
                         color = palette.textSecondary
                     )
@@ -155,16 +157,16 @@ fun ResultScreen(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(modifier = Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("Combat Breakdown", style = MaterialTheme.typography.titleLarge, color = palette.textPrimary)
-                    MetricRow("Damage Dealt", "${stats.damageDealt} HP")
+                    Text("Match Stats", style = MaterialTheme.typography.titleLarge, color = palette.textPrimary)
+                    MetricRow("Damage Done", "${stats.damageDealt} HP")
                     HorizontalDivider(color = palette.border)
                     MetricRow("Damage Taken", "${stats.damageTaken} HP")
                     HorizontalDivider(color = palette.border)
-                    MetricRow("Wall Ricochets", "${stats.wallBounces}")
+                    MetricRow("Wall Bounces", "${stats.wallBounces}")
                     HorizontalDivider(color = palette.border)
-                    MetricRow("Max Bank Chain", "${stats.maxCombo}x")
+                    MetricRow("Best Combo", "${stats.maxCombo}x")
                     HorizontalDivider(color = palette.border)
-                    MetricRow("Ultimates Awakened", "${stats.ultimatesUsed}")
+                    MetricRow("Ultimates Used", "${stats.ultimatesUsed}")
                 }
             }
 
@@ -183,7 +185,7 @@ fun ResultScreen(
                 ) {
                     Icon(Icons.Default.Home, contentDescription = null, tint = palette.textPrimary)
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("Arena", color = palette.textPrimary, style = MaterialTheme.typography.labelLarge)
+                    Text("Home", color = palette.textPrimary, style = MaterialTheme.typography.labelLarge)
                 }
 
                 Button(
@@ -197,7 +199,7 @@ fun ResultScreen(
                 ) {
                     Icon(Icons.Default.Replay, contentDescription = null)
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("Rematch", style = MaterialTheme.typography.titleMedium, color = Color.White)
+                    Text("Play Again", style = MaterialTheme.typography.titleMedium, color = Color.White)
                 }
             }
 
@@ -210,7 +212,7 @@ fun ResultScreen(
                     .height(48.dp)
                     .testTag("result_fighters_button")
             ) {
-                Text("Switch or Recruit Fighters", color = palette.textPrimary, style = MaterialTheme.typography.labelLarge)
+                Text("Change Fighter", color = palette.textPrimary, style = MaterialTheme.typography.labelLarge)
             }
         }
     }

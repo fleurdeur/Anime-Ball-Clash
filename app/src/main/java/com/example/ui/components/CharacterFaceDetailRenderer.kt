@@ -315,8 +315,38 @@ object CharacterFaceDetailRenderer {
             }
 
             "guts_berserk" -> {
-                drawScarredOneEye(r, if (isUlt) Color(0xFFEF4444) else inkColor)
-                drawLine(Color.White, Offset(-r * 0.15f, -r * 0.88f), Offset(-r * 0.05f, -r * 0.45f), strokeWidth = r * 0.12f, cap = StrokeCap.Round)
+                if (isUlt) {
+                    // Berserker Armor Beast-of-Darkness jagged black-iron wolf helm + blazing crimson eyes
+                    sharedPath.reset()
+                    sharedPath.moveTo(-r * 0.90f, -r * 0.48f)
+                    sharedPath.lineTo(-r * 0.58f, -r * 1.18f)
+                    sharedPath.lineTo(-r * 0.24f, -r * 0.72f)
+                    sharedPath.lineTo(0f, -r * 0.92f)
+                    sharedPath.lineTo(r * 0.24f, -r * 0.72f)
+                    sharedPath.lineTo(r * 0.58f, -r * 1.18f)
+                    sharedPath.lineTo(r * 0.90f, -r * 0.48f)
+                    sharedPath.lineTo(r * 0.62f, r * 0.24f)
+                    sharedPath.lineTo(0f, r * 0.06f)
+                    sharedPath.lineTo(-r * 0.62f, r * 0.24f)
+                    sharedPath.close()
+                    drawPath(sharedPath, Color(0xFF09090B))
+                    drawPath(sharedPath, Color(0xFFEF4444), style = Stroke(width = 2.0f, join = StrokeJoin.Round))
+
+                    // Glowing crimson Beast-of-Darkness slit eyes
+                    for (sideIdx in 0..1) {
+                        val s = if (sideIdx == 0) -1f else 1f
+                        sharedPath.reset()
+                        sharedPath.moveTo(s * r * 0.14f, -r * 0.04f)
+                        sharedPath.lineTo(s * r * 0.62f, -r * 0.24f)
+                        sharedPath.lineTo(s * r * 0.46f, r * 0.06f)
+                        sharedPath.close()
+                        drawPath(sharedPath, Color(0xFFEF4444))
+                        drawLine(Color.White, Offset(s * r * 0.20f, -r * 0.05f), Offset(s * r * 0.52f, -r * 0.18f), strokeWidth = 1.8f, cap = StrokeCap.Round)
+                    }
+                } else {
+                    drawScarredOneEye(r, Color(0xFF7F1D1D))
+                    drawLine(Color.White, Offset(-r * 0.15f, -r * 0.88f), Offset(-r * 0.05f, -r * 0.45f), strokeWidth = r * 0.12f, cap = StrokeCap.Round)
+                }
             }
 
             "griffith_femto" -> {
@@ -472,7 +502,46 @@ object CharacterFaceDetailRenderer {
                     EyeVisualStyle.SCARRED_ONE_EYE -> drawScarredOneEye(r, iris)
                     EyeVisualStyle.FIERCE_SHONEN -> drawScowlEyes(r, iris)
                 }
+
+                // Subtle anime nose shadow tick + battle smirk/grit when mouth isn't masked
+                if (char.resolvedFaceMarkStyle != FaceMarkVisualStyle.FANG_JAW &&
+                    char.resolvedFaceMarkStyle != FaceMarkVisualStyle.SHINOBI_MASK
+                ) {
+                    drawLine(
+                        color = inkColor.copy(alpha = 0.65f),
+                        start = Offset(0f, r * 0.08f),
+                        end = Offset(-r * 0.04f, r * 0.15f),
+                        strokeWidth = 1.8f,
+                        cap = StrokeCap.Round
+                    )
+                    drawLine(
+                        color = inkColor.copy(alpha = 0.80f),
+                        start = Offset(-r * 0.16f, r * 0.26f),
+                        end = Offset(r * 0.18f, r * 0.23f),
+                        strokeWidth = 2.0f,
+                        cap = StrokeCap.Round
+                    )
+                }
             }
+        }
+
+        // Blazing anime Ultimate eye-flare streaks when awakened!
+        if (isUlt && char.id != "bondrewd_dawn") {
+            val flareColor = if (char.id == "kakarot_z") Color(0xFF38BDF8) else char.auraColor
+            drawLine(
+                color = flareColor.copy(alpha = 0.85f),
+                start = Offset(-r * 0.44f, -r * 0.06f),
+                end = Offset(-r * 0.82f, -r * 0.24f),
+                strokeWidth = (r * 0.06f).coerceAtLeast(2f),
+                cap = StrokeCap.Round
+            )
+            drawLine(
+                color = flareColor.copy(alpha = 0.85f),
+                start = Offset(r * 0.44f, -r * 0.06f),
+                end = Offset(r * 0.82f, -r * 0.24f),
+                strokeWidth = (r * 0.06f).coerceAtLeast(2f),
+                cap = StrokeCap.Round
+            )
         }
     }
 
@@ -645,9 +714,23 @@ object CharacterFaceDetailRenderer {
         drawCircle(inkColor, r * 0.042f, Offset(leftX + r * 0.02f, eyeY))
         drawCircle(inkColor, r * 0.042f, Offset(rightX - r * 0.02f, eyeY))
 
-        // Crisp anime eye catchlights
-        drawCircle(Color.White, r * 0.032f, Offset(leftX - r * 0.02f, eyeY - r * 0.04f))
-        drawCircle(Color.White, r * 0.032f, Offset(rightX - r * 0.06f, eyeY - r * 0.04f))
+        // Crisp anime upper lash line + dual eye catchlights
+        drawLine(
+            color = inkColor,
+            start = Offset(leftX - r * 0.18f, eyeY - r * 0.10f),
+            end = Offset(leftX + r * 0.16f, eyeY - r * 0.08f),
+            strokeWidth = (r * 0.055f).coerceAtLeast(1.8f),
+            cap = StrokeCap.Round
+        )
+        drawLine(
+            color = inkColor,
+            start = Offset(rightX - r * 0.16f, eyeY - r * 0.08f),
+            end = Offset(rightX + r * 0.18f, eyeY - r * 0.10f),
+            strokeWidth = (r * 0.055f).coerceAtLeast(1.8f),
+            cap = StrokeCap.Round
+        )
+        drawCircle(Color.White, r * 0.035f, Offset(leftX - r * 0.02f, eyeY - r * 0.04f))
+        drawCircle(Color.White, r * 0.035f, Offset(rightX - r * 0.06f, eyeY - r * 0.04f))
 
         drawAngryBrows(r)
     }

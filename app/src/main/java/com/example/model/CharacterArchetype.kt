@@ -5,29 +5,29 @@ import kotlin.math.abs
 import kotlin.math.max
 
 enum class CharacterClass(val displayName: String, val shortRole: String) {
-    ATTACKER("Bruiser", "Heavy Impact"),
-    SPEEDSTER("Blitz", "High Velocity"),
-    CONTROL_MAGIC("Tactician", "Control & Hex")
+    ATTACKER("Heavy", "Strong Hits"),
+    SPEEDSTER("Fast", "Quick Speed"),
+    CONTROL_MAGIC("Magic", "Control")
 }
 
 enum class CharacterAlignment(val displayName: String, val badgeLabel: String) {
-    PROTAGONIST("Protagonist", "HERO"),
-    ANTAGONIST("Antagonist", "VILLAIN")
+    PROTAGONIST("Hero", "HERO"),
+    ANTAGONIST("Villain", "VILLAIN")
 }
 
 enum class AnimeTier(val displayName: String) {
-    POPULAR("Popular Hit"),
-    CULT("Cult Favorite"),
-    NICHE("Niche Gem")
+    POPULAR("Popular"),
+    CULT("Classic"),
+    NICHE("Rare")
 }
 
 enum class ElementTag(val displayName: String, val badgeColor: Long) {
     ALL("All", 0xFF475569),
-    FIRE("Flame", 0xFFE5392D),
-    ELEC("Volt", 0xFF0284C7),
-    SLASH("Blade", 0xFF16A34A),
-    HEAVY("Brawl", 0xFFD97706),
-    MAGIC("Arcane", 0xFF7C3AED)
+    FIRE("Fire", 0xFFE5392D),
+    ELEC("Bolt", 0xFF0284C7),
+    SLASH("Slash", 0xFF16A34A),
+    HEAVY("Smash", 0xFFD97706),
+    MAGIC("Magic", 0xFF7C3AED)
 }
 
 enum class WeaponVisualType {
@@ -68,24 +68,24 @@ enum class WeaponVisualType {
  * triggers authentic gameplay mechanics on collision, defense, or wall ricochet.
  */
 enum class PassiveArchetype(val shortTag: String) {
-    SHOCKWAVE_KNOCKBACK("IMPACT WAVE"),
-    SCORCH_BURN("BLAZE BURN"),
-    CRIMSON_BLEED("BLEED SLASH"),
-    LIGHTNING_PARALYZE("VOLT STUN"),
-    ELASTIC_MOMENTUM("SNAP REBOUND"),
-    INFINITY_BARRIER("AEGIS GUARD"),
-    VAMPIRIC_SIPHON("BLOOD DRAIN"),
-    ANTI_MAGIC_DRAIN("MANA BREAK"),
-    BERSERKER_RAGE("WRATH RAGE"),
-    VECTOR_REFLECT("COUNTER THORNS"),
-    SHADOW_MONARCH_STACK("SOUL HARVEST"),
-    ADAPTIVE_EVOLUTION("ROYAL EVOLVE"),
-    FROST_GRAVITY_SLOW("GRAVITY CHILL"),
-    BLACK_FLASH_CRIT("BLACK FLASH"),
-    REGEN_IMMORTAL("VITAL REGEN"),
-    EXECUTE_SHRINE("REAPER EXEC"),
-    ARCANE_OVERCHARGE("MANA SURGE"),
-    TITAN_JUGGERNAUT("IRON TITAN")
+    SHOCKWAVE_KNOCKBACK("BIG PUSH"),
+    SCORCH_BURN("FIRE BURN"),
+    CRIMSON_BLEED("BLEED"),
+    LIGHTNING_PARALYZE("STUN ZAP"),
+    ELASTIC_MOMENTUM("WALL BOOST"),
+    INFINITY_BARRIER("SHIELD"),
+    VAMPIRIC_SIPHON("LIFE STEAL"),
+    ANTI_MAGIC_DRAIN("DRAIN ULT"),
+    BERSERKER_RAGE("LOW HP RAGE"),
+    VECTOR_REFLECT("REFLECT"),
+    SHADOW_MONARCH_STACK("SPEED UP"),
+    ADAPTIVE_EVOLUTION("POWER UP"),
+    FROST_GRAVITY_SLOW("SLOW DOWN"),
+    BLACK_FLASH_CRIT("CRIT HIT"),
+    REGEN_IMMORTAL("HEAL"),
+    EXECUTE_SHRINE("FINISHER"),
+    ARCANE_OVERCHARGE("FAST ULT"),
+    TITAN_JUGGERNAUT("HEAVY ARMOR")
 }
 
 /**
@@ -105,9 +105,9 @@ enum class UltimateArchetype {
 }
 
 enum class UpgradeStatType(val title: String, val shortLabel: String) {
-    HEALTH("Vitality Core", "HP"),
-    POWER("Attack Force", "PWR"),
-    COOLDOWN("Chrono Drive", "CD")
+    HEALTH("Health", "HP"),
+    POWER("Power", "PWR"),
+    COOLDOWN("Faster Ult", "CD")
 }
 
 data class CharacterUpgradeState(

@@ -96,7 +96,7 @@ fun LoadingScreen(
                 border = BorderStroke(1.dp, palette.primaryAccent.copy(alpha = 0.35f))
             ) {
                 Text(
-                    text = "KINETIC 1V1 ARENA",
+                    text = "1V1 ANIME ARENA",
                     style = MaterialTheme.typography.labelSmall,
                     color = palette.primaryAccent,
                     modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp)
@@ -115,7 +115,7 @@ fun LoadingScreen(
             Spacer(modifier = Modifier.height(6.dp))
 
             Text(
-                text = "20 Anime Fighters • Nonstop Ricochet Combat",
+                text = "${CharacterRoster.characters.size} Anime Fighters • Nonstop Bounce",
                 style = MaterialTheme.typography.bodyMedium,
                 color = palette.textSecondary,
                 textAlign = TextAlign.Center

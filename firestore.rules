@@ -1,0 +1,250 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global Safety Net (Default Deny)
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // ===============================================================
+    // Helper Primitives
+    // ===============================================================
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+    function isValidUserProfile(data, userId) {
+      let keys = [
+        'userId', 'username', 'level', 'exp', 'maxExp', 'gold', 'gems',
+        'selectedCharacterId', 'rankedRating', 'rankTier', 'wins', 'losses',
+        'unlockedIds', 'upgradesPacked', 'createdAt', 'updatedAt'
+      ];
+      return data.keys().hasAll(keys)
+        && data.keys().hasOnly(keys)
+        && data.userId is string && data.userId == userId && data.userId.size() >= 1 && data.userId.size() <= 128
+        && data.username is string && data.username.size() >= 1 && data.username.size() <= 24
+        && data.level is int && data.level >= 1 && data.level <= 999
+        && data.exp is int && data.exp >= 0 && data.exp <= 10000000
+        && data.maxExp is int && data.maxExp >= 100 && data.maxExp <= 10000000
+        && data.gold is int && data.gold >= 0 && data.gold <= 999999999
+        && data.gems is int && data.gems >= 0 && data.gems <= 99999999
+        && data.selectedCharacterId is string && data.selectedCharacterId.size() >= 1 && data.selectedCharacterId.size() <= 64
+        && data.rankedRating is int && data.rankedRating >= 0 && data.rankedRating <= 100000
+        && data.rankTier is string && data.rankTier.size() >= 1 && data.rankTier.size() <= 24
+        && data.wins is int && data.wins >= 0 && data.wins <= 1000000
+        && data.losses is int && data.losses >= 0 && data.losses <= 1000000
+        && data.unlockedIds is list && data.unlockedIds.size() >= 1 && data.unlockedIds.size() <= 300 && data.unlockedIds[0] is string
+        && data.upgradesPacked is string && data.upgradesPacked.size() <= 8000
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidLeaderboardRecord(data, userId) {
+      let keys = [
+        'userId', 'username', 'characterId', 'rating', 'tier',
+        'wins', 'losses', 'isPublic', 'createdAt', 'updatedAt'
+      ];
+      return data.keys().hasAll(keys)
+        && data.keys().hasOnly(keys)
+        && data.userId is string && data.userId == userId && data.userId.size() >= 1 && data.userId.size() <= 128
+        && data.username is string && data.username.size() >= 1 && data.username.size() <= 24
+        && data.characterId is string && data.characterId.size() >= 1 && data.characterId.size() <= 64
+        && data.rating is int && data.rating >= 0 && data.rating <= 100000
+        && data.tier is string && data.tier.size() >= 1 && data.tier.size() <= 24
+        && data.wins is int && data.wins >= 0 && data.wins <= 1000000
+        && data.losses is int && data.losses >= 0 && data.losses <= 1000000
+        && data.isPublic is bool && data.isPublic == true
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidMatchRoom(data) {
+      let keys = [
+        'roomCode', 'mode', 'status',
+        'hostUid', 'hostName', 'hostCharId', 'hostRating', 'hostHpLvl', 'hostPwrLvl', 'hostCdLvl',
+        'guestUid', 'guestName', 'guestCharId', 'guestRating', 'guestHpLvl', 'guestPwrLvl', 'guestCdLvl',
+        'seed',
+        'hostCmdSeq', 'hostDirX', 'hostDirY', 'hostUltSeq', 'hostSyncHp',
+        'guestCmdSeq', 'guestDirX', 'guestDirY', 'guestUltSeq', 'guestSyncHp',
+        'winnerUid', 'createdAt', 'updatedAt'
+      ];
+      return data.keys().hasAll(keys)
+        && data.keys().hasOnly(keys)
+        && data.roomCode is string && data.roomCode.size() >= 4 && data.roomCode.size() <= 12
+        && data.mode is string && data.mode in ['ranked', 'friend']
+        && data.status is string && data.status in ['waiting', 'active', 'finished']
+        && data.hostUid is string && data.hostUid.size() >= 1 && data.hostUid.size() <= 128
+        && data.hostName is string && data.hostName.size() >= 1 && data.hostName.size() <= 24
+        && data.hostCharId is string && data.hostCharId.size() >= 1 && data.hostCharId.size() <= 64
+        && data.hostRating is int && data.hostRating >= 0 && data.hostRating <= 100000
+        && data.hostHpLvl is int && data.hostHpLvl >= 0 && data.hostHpLvl <= 10
+        && data.hostPwrLvl is int && data.hostPwrLvl >= 0 && data.hostPwrLvl <= 10
+        && data.hostCdLvl is int && data.hostCdLvl >= 0 && data.hostCdLvl <= 10
+        && data.guestUid is string && data.guestUid.size() <= 128
+        && data.guestName is string && data.guestName.size() <= 24
+        && data.guestCharId is string && data.guestCharId.size() <= 64
+        && data.guestRating is int && data.guestRating >= 0 && data.guestRating <= 100000
+        && data.guestHpLvl is int && data.guestHpLvl >= 0 && data.guestHpLvl <= 10
+        && data.guestPwrLvl is int && data.guestPwrLvl >= 0 && data.guestPwrLvl <= 10
+        && data.guestCdLvl is int && data.guestCdLvl >= 0 && data.guestCdLvl <= 10
+        && data.seed is int && data.seed >= 0 && data.seed <= 2147483647
+        && data.hostCmdSeq is int && data.hostCmdSeq >= 0 && data.hostCmdSeq <= 1000000
+        && data.hostDirX is number && data.hostDirX >= -2 && data.hostDirX <= 2
+        && data.hostDirY is number && data.hostDirY >= -2 && data.hostDirY <= 2
+        && data.hostUltSeq is int && data.hostUltSeq >= 0 && data.hostUltSeq <= 1000000
+        && data.hostSyncHp is int && data.hostSyncHp >= 0 && data.hostSyncHp <= 2000
+        && data.guestCmdSeq is int && data.guestCmdSeq >= 0 && data.guestCmdSeq <= 1000000
+        && data.guestDirX is number && data.guestDirX >= -2 && data.guestDirX <= 2
+        && data.guestDirY is number && data.guestDirY >= -2 && data.guestDirY <= 2
+        && data.guestUltSeq is int && data.guestUltSeq >= 0 && data.guestUltSeq <= 1000000
+        && data.guestSyncHp is int && data.guestSyncHp >= 0 && data.guestSyncHp <= 2000
+        && data.winnerUid is string && data.winnerUid.size() <= 128
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    // ===============================================================
+    // 1. Private User Progression (/users/{userId})
+    // ===============================================================
+    match /users/{userId} {
+      allow get: if isOwner(userId) && isValidId(userId);
+      allow list: if false;
+      allow create: if isOwner(userId)
+        && isValidId(userId)
+        && isValidUserProfile(incoming(), userId)
+        && incoming().createdAt <= request.time
+        && incoming().updatedAt <= request.time;
+      allow update: if isOwner(userId)
+        && isValidId(userId)
+        && isValidUserProfile(incoming(), userId)
+        && incoming().userId == existing().userId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt <= request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'username', 'level', 'exp', 'maxExp', 'gold', 'gems',
+          'selectedCharacterId', 'rankedRating', 'rankTier', 'wins', 'losses',
+          'unlockedIds', 'upgradesPacked', 'updatedAt'
+        ]);
+      allow delete: if isOwner(userId) && isValidId(userId);
+    }
+
+    // ===============================================================
+    // 2. Public Online Ranked Leaderboard (/leaderboard/{userId})
+    // ===============================================================
+    match /leaderboard/{userId} {
+      allow get: if isSignedIn() && isValidId(userId);
+      allow list: if isSignedIn() && resource.data.isPublic == true;
+      allow create: if isOwner(userId)
+        && isValidId(userId)
+        && isValidLeaderboardRecord(incoming(), userId)
+        && incoming().createdAt <= request.time
+        && incoming().updatedAt <= request.time;
+      allow update: if isOwner(userId)
+        && isValidId(userId)
+        && isValidLeaderboardRecord(incoming(), userId)
+        && incoming().userId == existing().userId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt <= request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'username', 'characterId', 'rating', 'tier', 'wins', 'losses', 'updatedAt'
+        ]);
+      allow delete: if isOwner(userId) && isValidId(userId);
+    }
+
+    // ===============================================================
+    // 3. Real-Time 1v1 Match Rooms (/match_rooms/{roomId})
+    // ===============================================================
+    match /match_rooms/{roomId} {
+      allow get: if isSignedIn() && isValidId(roomId);
+      allow list: if isSignedIn() && (
+        resource.data.status == 'waiting' ||
+        resource.data.hostUid == request.auth.uid ||
+        resource.data.guestUid == request.auth.uid
+      );
+
+      allow create: if isSignedIn()
+        && isValidId(roomId)
+        && isValidMatchRoom(incoming())
+        && incoming().hostUid == request.auth.uid
+        && incoming().guestUid == ''
+        && incoming().status == 'waiting'
+        && incoming().winnerUid == ''
+        && incoming().createdAt <= request.time
+        && incoming().updatedAt <= request.time;
+
+      allow update: if isSignedIn()
+        && isValidId(roomId)
+        && isValidMatchRoom(incoming())
+        && existing().status != 'finished'
+        && incoming().createdAt == existing().createdAt
+        && incoming().hostUid == existing().hostUid
+        && incoming().mode == existing().mode
+        && incoming().roomCode == existing().roomCode
+        && incoming().seed == existing().seed
+        && incoming().updatedAt <= request.time
+        && (
+          // Action A: Guest joins an open waiting room
+          (
+            existing().status == 'waiting'
+            && existing().guestUid == ''
+            && request.auth.uid != existing().hostUid
+            && incoming().guestUid == request.auth.uid
+            && incoming().status == 'active'
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'status', 'guestUid', 'guestName', 'guestCharId', 'guestRating',
+              'guestHpLvl', 'guestPwrLvl', 'guestCdLvl', 'guestSyncHp', 'updatedAt'
+            ])
+          )
+          ||
+          // Action B: Host sends combat impulse / Ultimate / authoritative HP or finishes match
+          (
+            existing().status == 'active'
+            && request.auth.uid == existing().hostUid
+            && incoming().guestUid == existing().guestUid
+            && (incoming().status == 'active' || incoming().status == 'finished')
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'status', 'hostCmdSeq', 'hostDirX', 'hostDirY', 'hostUltSeq',
+              'hostSyncHp', 'guestSyncHp', 'winnerUid', 'updatedAt'
+            ])
+          )
+          ||
+          // Action C: Guest sends combat impulse / Ultimate / HP checkpoint or finishes match
+          (
+            existing().status == 'active'
+            && request.auth.uid == existing().guestUid
+            && incoming().guestUid == existing().guestUid
+            && (incoming().status == 'active' || incoming().status == 'finished')
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'status', 'guestCmdSeq', 'guestDirX', 'guestDirY', 'guestUltSeq',
+              'guestSyncHp', 'winnerUid', 'updatedAt'
+            ])
+          )
+        );
+
+      allow delete: if isSignedIn()
+        && isValidId(roomId)
+        && resource.data.hostUid == request.auth.uid
+        && (resource.data.status == 'waiting' || resource.data.status == 'finished');
+    }
+  }
+}

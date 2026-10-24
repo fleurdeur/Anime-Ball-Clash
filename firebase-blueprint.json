@@ -1,0 +1,114 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Cloud-saved player account progression, currencies, unlocked character IDs, and stat upgrades.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "Owner Firebase Auth UID." },
+        "username": { "type": "string", "description": "Display name (1-24 chars)." },
+        "level": { "type": "integer", "description": "Account level." },
+        "exp": { "type": "integer", "description": "Current experience points." },
+        "maxExp": { "type": "integer", "description": "Experience required for next level." },
+        "gold": { "type": "integer", "description": "Gold currency balance." },
+        "gems": { "type": "integer", "description": "Gem currency balance." },
+        "selectedCharacterId": { "type": "string", "description": "Equipped fighter ID." },
+        "rankedRating": { "type": "integer", "description": "Online ranked RP rating." },
+        "rankTier": { "type": "string", "description": "Computed rank tier badge." },
+        "wins": { "type": "integer", "description": "Total match wins." },
+        "losses": { "type": "integer", "description": "Total match losses." },
+        "unlockedIds": { "type": "array", "items": { "type": "string" }, "description": "Unlocked character IDs (max 300)." },
+        "upgradesPacked": { "type": "string", "description": "Compact character upgrade levels encoding." },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Immutable creation timestamp." },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Last update timestamp." }
+      },
+      "required": [
+        "userId", "username", "level", "exp", "maxExp", "gold", "gems",
+        "selectedCharacterId", "rankedRating", "rankTier", "wins", "losses",
+        "unlockedIds", "upgradesPacked", "createdAt", "updatedAt"
+      ]
+    },
+    "LeaderboardRecord": {
+      "title": "LeaderboardRecord",
+      "description": "Public online ranked leaderboard entry for an authenticated player.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "Owner Firebase Auth UID." },
+        "username": { "type": "string", "description": "Public display name." },
+        "characterId": { "type": "string", "description": "Featured fighter ID." },
+        "rating": { "type": "integer", "description": "Online Ranked RP." },
+        "tier": { "type": "string", "description": "Rank tier title." },
+        "wins": { "type": "integer", "description": "Total wins." },
+        "losses": { "type": "integer", "description": "Total losses." },
+        "isPublic": { "type": "boolean", "description": "Always true for public ladder queries." },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Immutable creation timestamp." },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Last update timestamp." }
+      },
+      "required": [
+        "userId", "username", "characterId", "rating", "tier",
+        "wins", "losses", "isPublic", "createdAt", "updatedAt"
+      ]
+    },
+    "MatchRoom": {
+      "title": "MatchRoom",
+      "description": "Live 1v1 multiplayer match room for Online Ranked matchmaking and Internet Friend Room codes.",
+      "type": "object",
+      "properties": {
+        "roomCode": { "type": "string", "description": "6-character room code or ranked ticket code." },
+        "mode": { "type": "string", "enum": ["ranked", "friend"], "description": "Matchmaking mode." },
+        "status": { "type": "string", "enum": ["waiting", "active", "finished"], "description": "Lifecycle status." },
+        "hostUid": { "type": "string", "description": "Host player Auth UID." },
+        "hostName": { "type": "string", "description": "Host display name." },
+        "hostCharId": { "type": "string", "description": "Host fighter ID." },
+        "hostRating": { "type": "integer", "description": "Host RP rating." },
+        "hostHpLvl": { "type": "integer", "description": "Host HP upgrade level (0-10)." },
+        "hostPwrLvl": { "type": "integer", "description": "Host Power upgrade level (0-10)." },
+        "hostCdLvl": { "type": "integer", "description": "Host Cooldown upgrade level (0-10)." },
+        "guestUid": { "type": "string", "description": "Guest player Auth UID (empty while waiting)." },
+        "guestName": { "type": "string", "description": "Guest display name." },
+        "guestCharId": { "type": "string", "description": "Guest fighter ID." },
+        "guestRating": { "type": "integer", "description": "Guest RP rating." },
+        "guestHpLvl": { "type": "integer", "description": "Guest HP upgrade level (0-10)." },
+        "guestPwrLvl": { "type": "integer", "description": "Guest Power upgrade level (0-10)." },
+        "guestCdLvl": { "type": "integer", "description": "Guest Cooldown upgrade level (0-10)." },
+        "seed": { "type": "integer", "description": "Deterministic arena seed." },
+        "hostCmdSeq": { "type": "integer", "description": "Host launch/dash command sequence." },
+        "hostDirX": { "type": "number", "description": "Host normalized X launch vector." },
+        "hostDirY": { "type": "number", "description": "Host normalized Y launch vector." },
+        "hostUltSeq": { "type": "integer", "description": "Host Ultimate trigger sequence." },
+        "hostSyncHp": { "type": "integer", "description": "Host authoritative HP checkpoint." },
+        "guestCmdSeq": { "type": "integer", "description": "Guest launch/dash command sequence." },
+        "guestDirX": { "type": "number", "description": "Guest normalized X launch vector." },
+        "guestDirY": { "type": "number", "description": "Guest normalized Y launch vector." },
+        "guestUltSeq": { "type": "integer", "description": "Guest Ultimate trigger sequence." },
+        "guestSyncHp": { "type": "integer", "description": "Guest HP checkpoint." },
+        "winnerUid": { "type": "string", "description": "Winner Auth UID once status is finished." },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Immutable creation timestamp." },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Last update timestamp." }
+      },
+      "required": [
+        "roomCode", "mode", "status", "hostUid", "hostName", "hostCharId", "hostRating",
+        "hostHpLvl", "hostPwrLvl", "hostCdLvl",
+        "guestUid", "guestName", "guestCharId", "guestRating",
+        "guestHpLvl", "guestPwrLvl", "guestCdLvl",
+        "seed", "hostCmdSeq", "hostDirX", "hostDirY", "hostUltSeq", "hostSyncHp",
+        "guestCmdSeq", "guestDirX", "guestDirY", "guestUltSeq", "guestSyncHp",
+        "winnerUid", "createdAt", "updatedAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "Private player progression profile owned strictly by userId."
+    },
+    "/leaderboard/{userId}": {
+      "schema": { "$ref": "#/entities/LeaderboardRecord" },
+      "description": "Public ranked leaderboard row owned by userId and readable by signed-in players."
+    },
+    "/match_rooms/{roomId}": {
+      "schema": { "$ref": "#/entities/MatchRoom" },
+      "description": "Real-time 1v1 online ranked and friend code battle rooms."
+    }
+  }
+}

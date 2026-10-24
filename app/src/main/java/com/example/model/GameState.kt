@@ -4,6 +4,8 @@ enum class AppScreen {
     LOADING,
     HOME_HUB,
     CHARACTER_SELECT,
+    CUSTOM_MATCH,
+    MULTIPLAYER_LOBBY,
     MATCHMAKING,
     BATTLE_ARENA,
     RESULT,
@@ -13,9 +15,10 @@ enum class AppScreen {
 }
 
 enum class GameMode(val title: String, val tagLabel: String, val subtitle: String) {
-    PRACTICE_BOT("Solo Practice", "AI Bot", "Train nonstop ricochet combos against adaptive AI tiers"),
-    ONLINE_MATCH("Ranked Arena", "Competitive", "Climb from Unranked to Master in high-stakes 1v1 clashes"),
-    FRIENDS_LOBBY("Exhibition Duel", "Free Play", "Extended tournament-length 1v1 bout with full passives")
+    PRACTICE_BOT("Practice", "VS Bot", "Fight nonstop bounce battles against Easy, Normal (Hard), or Hard (Extreme) bots."),
+    CUSTOM_MATCH("Custom", "Pick Rival", "Pick both your fighter and any of the 224 anime rivals to duel."),
+    MULTIPLAYER("VS Friend", "LAN & Room", "Battle friends over local Wi-Fi (LAN) or anywhere online using a Room Code."),
+    ONLINE_MATCH("Ranked", "Online", "Play online 1v1 ranked clashes to earn Rank Points and climb the global ladder.")
 }
 
 enum class BotDifficulty(
@@ -25,9 +28,9 @@ enum class BotDifficulty(
     val speedFactor: Float,
     val redirectCooldownSec: Float
 ) {
-    EASY("Rookie", "Rookie", 0.72f, 0.90f, 5.2f),
-    MEDIUM("Challenger", "Challenger", 0.88f, 1.00f, 3.8f),
-    HARD("Grandmaster", "Master", 0.97f, 1.10f, 2.7f)
+    EASY("Easy", "Easy", 0.74f, 0.92f, 4.80f),
+    MEDIUM("Normal", "Hard", 0.95f, 1.15f, 2.45f),
+    HARD("Hard", "Extreme", 0.995f, 1.30f, 1.68f)
 }
 
 enum class TurnState {
@@ -112,8 +115,8 @@ object InitialGameData {
     val defaultQuests = listOf(
         QuestItem(
             id = "q_first_match",
-            title = "Opening Bell",
-            description = "Complete 1 nonstop arena battle in any mode.",
+            title = "First Fight",
+            description = "Finish 1 arena match in any mode.",
             currentProgress = 0,
             targetProgress = 1,
             rewardGold = 1_800,
@@ -122,8 +125,8 @@ object InitialGameData {
         ),
         QuestItem(
             id = "q_upgrade_forge",
-            title = "Ascension Forge",
-            description = "Upgrade any fighter's Health, Power, or Lower CD stat 1 time.",
+            title = "First Upgrade",
+            description = "Upgrade Health, Power, or Faster Ult 1 time.",
             currentProgress = 0,
             targetProgress = 1,
             rewardGold = 2_500,
@@ -132,8 +135,8 @@ object InitialGameData {
         ),
         QuestItem(
             id = "q_wall_ricochet",
-            title = "Pinball Kineticist",
-            description = "Trigger 40 wall ricochets across arena matches.",
+            title = "Wall Bouncer",
+            description = "Bounce off arena walls 40 times.",
             currentProgress = 0,
             targetProgress = 40,
             rewardGold = 3_800,
@@ -142,8 +145,8 @@ object InitialGameData {
         ),
         QuestItem(
             id = "q_awakenings",
-            title = "Limit Breaker",
-            description = "Activate an Ultimate Awakening 3 times in combat.",
+            title = "Ultimate Power",
+            description = "Use your Ultimate attack 3 times.",
             currentProgress = 0,
             targetProgress = 3,
             rewardGold = 5_200,
@@ -152,8 +155,8 @@ object InitialGameData {
         ),
         QuestItem(
             id = "q_clean_victory",
-            title = "Decisive Knockout",
-            description = "Win an extended clash with at least 120 HP remaining.",
+            title = "Strong Win",
+            description = "Win a match with 120 HP or more left.",
             currentProgress = 0,
             targetProgress = 1,
             rewardGold = 6_800,
@@ -162,8 +165,8 @@ object InitialGameData {
         ),
         QuestItem(
             id = "q_three_wins",
-            title = "Arena Contender",
-            description = "Win 3 arena clashes against AI or Ranked rivals.",
+            title = "Three Wins",
+            description = "Win 3 matches in any mode.",
             currentProgress = 0,
             targetProgress = 3,
             rewardGold = 9_500,
@@ -172,21 +175,10 @@ object InitialGameData {
         )
     )
 
-    private val rivalSeeds = listOf(
-        LeaderboardEntry(1, "SungShadow_KR", "jinwoo_monarch", 1890, "Master", "84%"),
-        LeaderboardEntry(2, "VectorOneWay", "accelerator_vector", 1780, "Master", "82%"),
-        LeaderboardEntry(3, "SixEyes_Satoru", "satoru_void", 1690, "Master", "80%"),
-        LeaderboardEntry(4, "ShrineKing", "sukuna_shrine", 1480, "Diamond", "77%"),
-        LeaderboardEntry(5, "DawnBondrewd", "bondrewd_dawn", 1290, "Diamond", "74%"),
-        LeaderboardEntry(6, "SeriousCaped", "caped_baldy", 1120, "Diamond", "72%"),
-        LeaderboardEntry(7, "GoldenTyrant", "frieza_emperor", 910, "Platinum", "69%"),
-        LeaderboardEntry(8, "TyphoonVash", "vash_stampede", 680, "Gold", "66%"),
-        LeaderboardEntry(9, "DecayHand", "shigaraki_decay", 420, "Gold", "61%"),
-        LeaderboardEntry(10, "SunBreather", "kamado_sun", 210, "Silver", "57%"),
-        LeaderboardEntry(11, "Rookie Sparring", "mugiwara_joy", 80, "Bronze", "51%")
-    )
-
-    fun buildLeaderboard(profile: PlayerProfile): List<LeaderboardEntry> {
+    fun buildLeaderboard(
+        profile: PlayerProfile,
+        onlineEntries: List<LeaderboardEntry> = emptyList()
+    ): List<LeaderboardEntry> {
         val playerEntry = LeaderboardEntry(
             rank = 0,
             name = profile.username,
@@ -196,15 +188,20 @@ object InitialGameData {
             winRate = "${profile.winRatePercent}%",
             isPlayer = true
         )
-        return (rivalSeeds + playerEntry)
+        val merged = if (onlineEntries.any { it.isPlayer }) {
+            onlineEntries
+        } else {
+            onlineEntries + playerEntry
+        }
+        return merged
             .sortedWith(compareByDescending<LeaderboardEntry> { it.rating }.thenByDescending { it.isPlayer })
             .mapIndexed { idx, entry -> entry.copy(rank = idx + 1) }
     }
 
     val combatTips = listOf(
-        "Once launched, both spheres ricochet nonstop off walls and each other until one hits 0 HP.",
-        "Every fighter has a live combat passive that triggers on clash, wall ricochet, or defense.",
-        "Invest Gold in Vitality Core (HP), Attack Force (PWR), and Chrono Drive (Lower CD) upgrades.",
-        "Drag anywhere on the court when Redirect is ready to bend your trajectory mid-flight."
+        "Balls bounce nonstop until one fighter hits 0 HP.",
+        "Every fighter has a special skill and a strong Ultimate attack.",
+        "Use Gold in the Shop to upgrade Health, Power, and Faster Ult.",
+        "Drag on the arena when Dash is ready to change direction."
     )
 }

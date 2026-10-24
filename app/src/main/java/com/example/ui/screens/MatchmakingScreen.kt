@@ -4,6 +4,7 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,6 +19,9 @@ import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
@@ -44,6 +48,8 @@ fun MatchmakingScreen(
     opponentChar: CharacterData,
     gameMode: GameMode,
     countdown: Int,
+    canStartRankedChallenger: Boolean = false,
+    onStartRankedChallenger: () -> Unit = {},
     onCancel: () -> Unit
 ) {
     val palette = AppTheme.palette
@@ -69,7 +75,7 @@ fun MatchmakingScreen(
                 border = BorderStroke(1.dp, palette.border)
             ) {
                 Text(
-                    text = "${gameMode.title} • Nonstop Until 0 HP",
+                    text = "${gameMode.title} • Fight to 0 HP",
                     style = MaterialTheme.typography.labelMedium,
                     color = palette.textPrimary,
                     modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
@@ -96,6 +102,7 @@ fun MatchmakingScreen(
                             character = playerChar,
                             accent = palette.blueAccent,
                             stageBg = palette.stageSurface,
+                            stageBorder = palette.stageLine,
                             textPrimary = palette.textPrimary,
                             textSecondary = palette.textSecondary,
                             modifier = Modifier.weight(1f)
@@ -120,6 +127,7 @@ fun MatchmakingScreen(
                             character = opponentChar,
                             accent = palette.primaryAccent,
                             stageBg = palette.stageSurface,
+                            stageBorder = palette.stageLine,
                             textPrimary = palette.textPrimary,
                             textSecondary = palette.textSecondary,
                             modifier = Modifier.weight(1f)
@@ -128,10 +136,48 @@ fun MatchmakingScreen(
 
                     Spacer(modifier = Modifier.height(20.dp))
 
+                    if (countdown < 0) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(22.dp),
+                                strokeWidth = 2.5.dp,
+                                color = palette.blueAccent
+                            )
+                            Text(
+                                text = "Searching online players...",
+                                style = MaterialTheme.typography.titleLarge,
+                                color = palette.textPrimary
+                            )
+                        }
+                    } else {
+                        Text(
+                            text = "Starting in $countdown...",
+                            style = MaterialTheme.typography.displayMedium,
+                            color = palette.textPrimary
+                        )
+                    }
+                }
+            }
+
+            if (countdown < 0 && canStartRankedChallenger) {
+                Button(
+                    onClick = onStartRankedChallenger,
+                    shape = RoundedCornerShape(14.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = palette.blueAccent,
+                        contentColor = Color.White
+                    ),
+                    modifier = Modifier
+                        .height(48.dp)
+                        .testTag("start_ranked_challenger_button")
+                ) {
                     Text(
-                        text = "Entering Court In $countdown",
-                        style = MaterialTheme.typography.displayMedium,
-                        color = palette.textPrimary
+                        text = "Fight Ranked Challenger Now",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = Color.White
                     )
                 }
             }
@@ -156,6 +202,7 @@ private fun FighterVersusColumn(
     character: CharacterData,
     accent: Color,
     stageBg: Color,
+    stageBorder: Color,
     textPrimary: Color,
     textSecondary: Color,
     modifier: Modifier = Modifier
@@ -168,7 +215,8 @@ private fun FighterVersusColumn(
             modifier = Modifier
                 .size(102.dp)
                 .clip(CircleShape)
-                .background(stageBg),
+                .background(stageBg)
+                .border(1.dp, stageBorder, CircleShape),
             contentAlignment = Alignment.Center
         ) {
             Canvas(modifier = Modifier.size(90.dp)) {

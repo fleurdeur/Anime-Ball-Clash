@@ -39,11 +39,11 @@ private data class NavTab(
 )
 
 private val hubTabs = listOf(
-    NavTab(AppScreen.HOME_HUB, "Arena", Icons.Filled.SportsKabaddi, Icons.Outlined.SportsKabaddi, "nav_play"),
+    NavTab(AppScreen.HOME_HUB, "Play", Icons.Filled.SportsKabaddi, Icons.Outlined.SportsKabaddi, "nav_play"),
     NavTab(AppScreen.CHARACTER_SELECT, "Fighters", Icons.Filled.Groups, Icons.Outlined.Groups, "nav_fighters"),
-    NavTab(AppScreen.SHOP, "Recruit", Icons.Filled.Storefront, Icons.Outlined.Storefront, "nav_shop"),
-    NavTab(AppScreen.QUESTS, "Missions", Icons.Filled.TaskAlt, Icons.Outlined.TaskAlt, "nav_missions"),
-    NavTab(AppScreen.LEADERBOARD, "Ladder", Icons.Filled.EmojiEvents, Icons.Outlined.EmojiEvents, "nav_ranks")
+    NavTab(AppScreen.SHOP, "Shop", Icons.Filled.Storefront, Icons.Outlined.Storefront, "nav_shop"),
+    NavTab(AppScreen.QUESTS, "Quests", Icons.Filled.TaskAlt, Icons.Outlined.TaskAlt, "nav_missions"),
+    NavTab(AppScreen.LEADERBOARD, "Ranks", Icons.Filled.EmojiEvents, Icons.Outlined.EmojiEvents, "nav_ranks")
 )
 
 @Composable

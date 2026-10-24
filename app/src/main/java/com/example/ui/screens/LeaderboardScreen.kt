@@ -80,12 +80,12 @@ fun LeaderboardScreen(
                 Spacer(modifier = Modifier.height(12.dp))
 
                 Text(
-                    text = "Arena Rankings",
+                    text = "Ranks",
                     style = MaterialTheme.typography.displayMedium,
                     color = palette.textPrimary
                 )
                 Text(
-                    text = "Win Ranked & Solo clashes to climb from Unranked to Master",
+                    text = "Online Ranked Ladder • Win matches to climb",
                     style = MaterialTheme.typography.bodyMedium,
                     color = palette.textSecondary
                 )
@@ -97,7 +97,11 @@ fun LeaderboardScreen(
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                     modifier = Modifier.weight(1f)
                 ) {
-                    items(items = leaderboard, key = { "${it.rank}_${it.name}" }) { entry ->
+                    items(
+                        items = leaderboard,
+                        key = { "${it.rank}_${it.name}" },
+                        contentType = { "rank_row" }
+                    ) { entry ->
                         val character = remember(entry.characterId) {
                             CharacterRoster.getById(entry.characterId)
                         }
@@ -109,7 +113,7 @@ fun LeaderboardScreen(
                             else -> palette.elevatedSurface
                         }
                         val rankBadgeFg = when (entry.rank) {
-                            1 -> Color(0xFF14161C)
+                            1 -> if (palette.isDark) Color(0xFF14161C) else Color.White
                             2, 3 -> Color.White
                             else -> palette.textPrimary
                         }
