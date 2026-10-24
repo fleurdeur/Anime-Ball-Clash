@@ -101,6 +101,7 @@ fun GraphicsConfigDialog(
     var selectedPhysicsMesh by remember(currentSettings.physicsMesh) { mutableStateOf(currentSettings.physicsMesh) }
     var selectedFps by remember(currentSettings.targetFps) { mutableStateOf(currentSettings.targetFps) }
     var sfxEnabled by remember(currentSettings.sfxEnabled) { mutableStateOf(currentSettings.sfxEnabled) }
+    var musicEnabled by remember(currentSettings.musicEnabled) { mutableStateOf(currentSettings.musicEnabled) }
     var hapticsEnabled by remember(currentSettings.hapticsEnabled) { mutableStateOf(currentSettings.hapticsEnabled) }
     var screenShake by remember(currentSettings.screenShake) { mutableStateOf(currentSettings.screenShake) }
     var confirmReset by remember { mutableStateOf(false) }
@@ -117,6 +118,7 @@ fun GraphicsConfigDialog(
         mesh: PhysicsMesh = selectedPhysicsMesh,
         fps: TargetFPS = selectedFps,
         sfx: Boolean = sfxEnabled,
+        music: Boolean = musicEnabled,
         haptics: Boolean = hapticsEnabled,
         shake: Boolean = screenShake
     ) {
@@ -127,6 +129,7 @@ fun GraphicsConfigDialog(
                 physicsMesh = mesh,
                 targetFps = fps,
                 sfxEnabled = sfx,
+                musicEnabled = music,
                 hapticsEnabled = haptics,
                 bloomPostFx = render.bloomGlow,
                 screenShake = shake
@@ -189,7 +192,7 @@ fun GraphicsConfigDialog(
 
                 // 1. Theme: Dark / Light / Auto
                 Text(
-                    text = "Theme",
+                    text = "Color Theme",
                     style = MaterialTheme.typography.labelLarge,
                     color = palette.textPrimary
                 )
@@ -245,7 +248,7 @@ fun GraphicsConfigDialog(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("Graphics", style = MaterialTheme.typography.labelLarge, color = palette.textPrimary)
+                    Text("Graphics Quality", style = MaterialTheme.typography.labelLarge, color = palette.textPrimary)
                     Text(
                         text = selectedRenderMode.subtitle,
                         style = MaterialTheme.typography.labelSmall,
@@ -287,8 +290,8 @@ fun GraphicsConfigDialog(
                     color = palette.textSecondary
                 )
 
-                // 3. Bounce Feel: Solid / Bouncy
-                Text("Bounce Feel", style = MaterialTheme.typography.labelLarge, color = palette.textPrimary)
+                // 3. Bounce Style: Solid / Bouncy
+                Text("Bounce Style", style = MaterialTheme.typography.labelLarge, color = palette.textPrimary)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -319,8 +322,8 @@ fun GraphicsConfigDialog(
                     }
                 }
 
-                // 4. Frame Rate: 30 / 60 / 90 / 120
-                Text("Frame Rate", style = MaterialTheme.typography.labelLarge, color = palette.textPrimary)
+                // 4. Smooth Speed (FPS): 30 / 60 / 90 / 120
+                Text("Speed (FPS)", style = MaterialTheme.typography.labelLarge, color = palette.textPrimary)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -358,7 +361,14 @@ fun GraphicsConfigDialog(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("Sound", style = MaterialTheme.typography.bodyLarge, color = palette.textPrimary)
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Sound & Voice", style = MaterialTheme.typography.bodyLarge, color = palette.textPrimary)
+                        Text(
+                            text = "Hits, Counter blocks & Ultimate voice lines",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = palette.textSecondary
+                        )
+                    }
                     Switch(
                         checked = sfxEnabled,
                         onCheckedChange = {
@@ -370,6 +380,33 @@ fun GraphicsConfigDialog(
                             checkedTrackColor = palette.primaryAccent
                         ),
                         modifier = Modifier.testTag("sfx_toggle_switch")
+                    )
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Fight Music", style = MaterialTheme.typography.bodyLarge, color = palette.textPrimary)
+                        Text(
+                            text = "Changes live with Clash, Ultimate & low HP",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = palette.textSecondary
+                        )
+                    }
+                    Switch(
+                        checked = musicEnabled,
+                        onCheckedChange = {
+                            musicEnabled = it
+                            pushLiveSettings(music = it)
+                        },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = Color.White,
+                            checkedTrackColor = palette.goldAccent
+                        ),
+                        modifier = Modifier.testTag("music_toggle_switch")
                     )
                 }
 

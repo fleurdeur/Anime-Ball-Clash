@@ -104,6 +104,84 @@ enum class UltimateArchetype {
     SOUL_DEVOUR        // Steals rival HP & Ultimate meter while boosting speed
 }
 
+/**
+ * Active Counter Ability system across all 224 characters:
+ * - Normal fighters block & push back incoming attacks.
+ * - Specialized fighters gain thematic immunities (Time Immunity, Anti-Magic, Infinity, Stand Rush, Full Reflect, etc.).
+ */
+enum class CounterArchetype(
+    val shortLabel: String,
+    val simpleName: String,
+    val simpleDesc: String,
+    val popupCallout: String
+) {
+    GUARD_PARRY(
+        shortLabel = "AUTO BLOCK",
+        simpleName = "Block & Push",
+        simpleDesc = "Blocks the hit with zero damage and pushes rival back.",
+        popupCallout = "BLOCKED!"
+    ),
+    TELEPORT_STRIKE(
+        shortLabel = "TELEPORT",
+        simpleName = "Teleport Behind",
+        simpleDesc = "Teleports behind rival to dodge the hit and attack from behind!",
+        popupCallout = "TELEPORT BEHIND!"
+    ),
+    TIME_IMMUNITY(
+        shortLabel = "TIME IMMUNE",
+        simpleName = "Time Immune",
+        simpleDesc = "Breaks Time Stop & stuns, blocks damage, and freezes rival.",
+        popupCallout = "TIME IMMUNE!"
+    ),
+    ANTI_MAGIC_NULL(
+        shortLabel = "ANTI-MAGIC",
+        simpleName = "Anti-Magic",
+        simpleDesc = "Blocks magic & Ultimates, cancels rival Ult, and drains meter.",
+        popupCallout = "ANTI-MAGIC!"
+    ),
+    INFINITY_BARRIER_COUNTER(
+        shortLabel = "INFINITY",
+        simpleName = "Untouchable",
+        simpleDesc = "Stops the hit before it touches you and blasts rival away.",
+        popupCallout = "INFINITY!"
+    ),
+    STAND_RUSH_COUNTER(
+        shortLabel = "STAND GUARD",
+        simpleName = "Stand Counter",
+        simpleDesc = "Stand spirit blocks the hit and punches back fast!",
+        popupCallout = "STAND RUSH!"
+    ),
+    VECTOR_REFLECT_COUNTER(
+        shortLabel = "REFLECT",
+        simpleName = "Full Reflect",
+        simpleDesc = "Blocks all damage and sends the hit right back at rival.",
+        popupCallout = "REFLECTED!"
+    ),
+    SHADOW_DODGE(
+        shortLabel = "DODGE",
+        simpleName = "Quick Dodge",
+        simpleDesc = "Slips past the attack with zero damage and boosts speed.",
+        popupCallout = "DODGED!"
+    ),
+    TITAN_ARMOR_COUNTER(
+        shortLabel = "IRON GUARD",
+        simpleName = "Iron Armor",
+        simpleDesc = "Shrugs off hits and stuns with zero damage, then slams back.",
+        popupCallout = "ARMOR SLAM!"
+    )
+}
+
+enum class JoJoStandStyle(val standName: String, val battleCry: String) {
+    NONE("", ""),
+    STAR_PLATINUM("Star Platinum", "ORA ORA ORA!"),
+    THE_WORLD("The World", "MUDA MUDA MUDA!"),
+    GOLD_EXPERIENCE_REQUIEM("Gold Experience Requiem", "MUDA MUDA! ZERO!"),
+    KING_CRIMSON("King Crimson", "TIME ERASED!"),
+    KILLER_QUEEN("Killer Queen", "CLICK! BOOM!"),
+    MADE_IN_HEAVEN("Made in Heaven", "HEAVEN SPEED!"),
+    HERMIT_PURPLE("Hermit Purple", "HAMON OVERDRIVE!")
+}
+
 enum class UpgradeStatType(val title: String, val shortLabel: String) {
     HEALTH("Health", "HP"),
     POWER("Power", "PWR"),
@@ -311,6 +389,172 @@ data class CharacterData(
                 8 -> FaceMarkVisualStyle.BLOOD_STRIPE
                 else -> FaceMarkVisualStyle.STAR_TEAR
             }
+        }
+
+    val joJoStandStyle: JoJoStandStyle
+        get() = when (id) {
+            "kujo_star" -> JoJoStandStyle.STAR_PLATINUM
+            "dio_world" -> JoJoStandStyle.THE_WORLD
+            "giorno_requiem" -> JoJoStandStyle.GOLD_EXPERIENCE_REQUIEM
+            "diavolo_crimson" -> JoJoStandStyle.KING_CRIMSON
+            "kira_killer_queen" -> JoJoStandStyle.KILLER_QUEEN
+            "pucci_heaven" -> JoJoStandStyle.MADE_IN_HEAVEN
+            "joseph_hamon" -> JoJoStandStyle.HERMIT_PURPLE
+            else -> JoJoStandStyle.NONE
+        }
+
+    val hasStandSpirit: Boolean
+        get() = joJoStandStyle != JoJoStandStyle.NONE
+
+    val counterArchetype: CounterArchetype
+        get() = when {
+            id in setOf("kujo_star", "dio_world", "diavolo_crimson", "pucci_heaven") ->
+                CounterArchetype.TIME_IMMUNITY
+            id in setOf("giorno_requiem", "kira_killer_queen", "joseph_hamon") ->
+                CounterArchetype.STAND_RUSH_COUNTER
+            id in setOf("asta_grimoire", "blackbeard_tremor") ||
+                passiveArchetype == PassiveArchetype.ANTI_MAGIC_DRAIN ||
+                ultimateArchetype == UltimateArchetype.ULT_NULLIFY ->
+                CounterArchetype.ANTI_MAGIC_NULL
+            id in setOf("satoru_void", "griffith_femto", "madara_uchiha", "aizen_kyoka") ||
+                passiveArchetype == PassiveArchetype.INFINITY_BARRIER ->
+                CounterArchetype.INFINITY_BARRIER_COUNTER
+            id in setOf("elric_fullmetal", "accelerator_vector", "meliodas_wrath", "makima_control") ||
+                passiveArchetype == PassiveArchetype.VECTOR_REFLECT ->
+                CounterArchetype.VECTOR_REFLECT_COUNTER
+            LorePowerBalancer.isTeleportCounterCharacter(this) ->
+                CounterArchetype.TELEPORT_STRIKE
+            ultimateArchetype == UltimateArchetype.TIME_STOP ->
+                CounterArchetype.TIME_IMMUNITY
+            id in setOf("yeager_titan", "guts_berserk", "caped_baldy", "kafka_kaiju", "kars_ultimate") ||
+                passiveArchetype == PassiveArchetype.TITAN_JUGGERNAUT ||
+                (element == ElementTag.HEAVY && massRating >= 1.62f) ->
+                CounterArchetype.TITAN_ARMOR_COUNTER
+            classType == CharacterClass.SPEEDSTER ->
+                CounterArchetype.SHADOW_DODGE
+            else ->
+                CounterArchetype.GUARD_PARRY
+        }
+
+    val animeRace: AnimeRace
+        get() = LorePowerBalancer.resolveAnimeRace(this)
+
+    val worldScaleTier: WorldScaleTier
+        get() = LorePowerBalancer.resolveWorldScaleTier(this)
+
+    val canonProjectileStyle: CanonProjectileStyle
+        get() = LorePowerBalancer.resolveCanonProjectileStyle(this)
+
+    val baseAutoCounterChance: Float
+        get() = LorePowerBalancer.resolveBaseAutoCounterChance(this)
+
+    val autoCounterPercent: Int
+        get() = (baseAutoCounterChance * 100f).toInt()
+
+    val simpleAutoCounterSummary: String
+        get() = "Auto $autoCounterPercent% chance when attacked: ${counterArchetype.simpleDesc}"
+
+    val simplePassiveSummary: String
+        get() = when (passiveArchetype) {
+            PassiveArchetype.SHOCKWAVE_KNOCKBACK -> "Pushes rival back further and hits +4 harder."
+            PassiveArchetype.SCORCH_BURN -> "Burns rival with fire damage after each hit."
+            PassiveArchetype.CRIMSON_BLEED -> "Cuts rival to deal extra bleed damage over time."
+            PassiveArchetype.LIGHTNING_PARALYZE -> "Zaps and briefly stops rival on hit."
+            PassiveArchetype.ELASTIC_MOMENTUM -> "Bounces off walls faster for +50% wall-shot power."
+            PassiveArchetype.INFINITY_BARRIER -> "Magic shield cuts incoming hit damage by 22%."
+            PassiveArchetype.VAMPIRIC_SIPHON -> "Heals your HP for 28% of hit damage dealt."
+            PassiveArchetype.ANTI_MAGIC_DRAIN -> "Drains 14% of rival's Ult bar on every hit."
+            PassiveArchetype.BERSERKER_RAGE -> "Hits up to 48% harder when your HP gets low."
+            PassiveArchetype.VECTOR_REFLECT -> "Bounces 28% of hit damage right back at rival."
+            PassiveArchetype.SHADOW_MONARCH_STACK -> "Gets faster every time you hit the rival."
+            PassiveArchetype.ADAPTIVE_EVOLUTION -> "Gets stronger on every hit and charges Ult faster."
+            PassiveArchetype.FROST_GRAVITY_SLOW -> "Slows down the rival ball on hit."
+            PassiveArchetype.BLACK_FLASH_CRIT -> "Every 3rd hit lands a big 1.45x critical smash."
+            PassiveArchetype.REGEN_IMMORTAL -> "Heals HP every 3rd wall bounce."
+            PassiveArchetype.EXECUTE_SHRINE -> "Deals +32% extra damage when rival is below half HP."
+            PassiveArchetype.ARCANE_OVERCHARGE -> "Fills your Ult bar faster and hits harder above 50% Ult."
+            PassiveArchetype.TITAN_JUGGERNAUT -> "Resists pushback and crushes lighter rivals."
+        }
+
+    val simpleUltimateSummary: String
+        get() = when {
+            id == "satoru_void" ->
+                "Freezes rival in Domain and shoots Hollow Purple orb at rival + Multi-Dash!"
+            canonProjectileStyle == CanonProjectileStyle.BABYLON_SWORD_RAIN ->
+                "Summons multiple visible swords and throws them at rival for big damage + Multi-Dash!"
+            canonProjectileStyle == CanonProjectileStyle.FLYING_RAIJIN_KUNAI ->
+                "Throws teleport kunai at rival to warp behind and attack + Multi-Dash!"
+            ultimateArchetype == UltimateArchetype.TIME_STOP ->
+                "Stops time to freeze rival and shoots ${canonProjectileStyle.simpleMoveLabel.lowercase().removePrefix("shoots ").removePrefix("fires ")} + Multi-Dash!"
+            ultimateArchetype == UltimateArchetype.DOMAIN_STUN ->
+                "Traps rival in your Domain and ${canonProjectileStyle.simpleMoveLabel.lowercase()} + Multi-Dash!"
+            ultimateArchetype == UltimateArchetype.METEOR_NUKE ->
+                "${canonProjectileStyle.simpleMoveLabel} at rival for big AoE damage + Multi-Dash!"
+            ultimateArchetype == UltimateArchetype.SERIOUS_ONE_PUNCH ->
+                "Next hit deals massive one-punch damage and ${canonProjectileStyle.simpleMoveLabel.lowercase()} + Multi-Dash!"
+            ultimateArchetype == UltimateArchetype.HEAL_REFORGE ->
+                "Heals big HP right away, powers up hits, and ${canonProjectileStyle.simpleMoveLabel.lowercase()} + Multi-Dash!"
+            ultimateArchetype == UltimateArchetype.ULT_NULLIFY ->
+                "Cancels rival's Ultimate, drains Ult bar, and ${canonProjectileStyle.simpleMoveLabel.lowercase()} + Multi-Dash!"
+            ultimateArchetype == UltimateArchetype.HAZARD_STORM ->
+                "${canonProjectileStyle.simpleMoveLabel} and leaves fire zones across the arena + Multi-Dash!"
+            ultimateArchetype == UltimateArchetype.GRAVITY_CRUSH ->
+                "${canonProjectileStyle.simpleMoveLabel} to crush and slow rival + Multi-Dash!"
+            ultimateArchetype == UltimateArchetype.SOUL_DEVOUR ->
+                "${canonProjectileStyle.simpleMoveLabel} to steal rival HP and Ult power + Multi-Dash!"
+            else ->
+                "Big speed boost, ${canonProjectileStyle.simpleMoveLabel.lowercase()}, and fast Multi-Dash!"
+        }
+
+    val officialUltVoiceLine: String
+        get() = when (id) {
+            "kakarot_z" -> "Ka... Me... Ha... Me... HAAA! Ultra Instinct!"
+            "kamado_sun" -> "Hinokami Kagura! Clear Blue Sky!"
+            "raikiri_shinobi" -> "Kamui! Lightning Blade!"
+            "mugiwara_joy" -> "Gear Fifth! Drums of Liberation!"
+            "shigaraki_decay" -> "Decay! Everything turns to dust!"
+            "midoriya_ofa" -> "One For All, Full Cowling, One Hundred Percent! Smash!"
+            "roronoa_ashura" -> "King of Hell! Three Sword Style, Ashura!"
+            "dragneel_ignis" -> "Fire Dragon King's Demolition Fist!"
+            "satoru_void" -> "Domain Expansion: Unlimited Void! Hollow Purple!"
+            "gilgamesh_babylon" -> "Gate of Babylon! Enuma Elish! Rain of Swords!"
+            "minato_flash" -> "Flying Raijin! Flash Rasengan!"
+            "archer_ubw" -> "I am the bone of my sword! Unlimited Blade Works!"
+            "byakuya_senbonzakura" -> "Scatter... Senbonzakura Kageyoshi!"
+            "frieza_emperor" -> "Tremble before Golden Frieza!"
+            "chainsaw_devil" -> "Roar, Chainsaw! Tear them apart!"
+            "elric_fullmetal" -> "Fullmetal Alchemy! Transmute!"
+            "muzan_progenitor" -> "Blood Demon Art! Bow before Muzan!"
+            "asta_grimoire" -> "Black Asta! Devil Union! My magic is never giving up!"
+            "okarun_turbo" -> "All-out full throttle! Turbo Power!"
+            "kurosaki_hollow" -> "Bankai! Tensa Zangetsu! Getsuga Tensho!"
+            "aizen_kyoka" -> "Shatter, Kyoka Suigetsu! Kurohitsugi!"
+            "yeager_titan" -> "The Rumbling begins! Keep moving forward!"
+            "rimuru_tempest" -> "Beelzebuth! Devour everything!"
+            "killua_godspeed" -> "Kanmuru! Whirlwind Godspeed!"
+            "kafka_kaiju" -> "Kaiju Number Eight, Full Release!"
+            "makima_control" -> "Control Devil Contract... Bang!"
+            "kageyama_esper" -> "One Hundred Percent! Psychic Explosion!"
+            "blackbeard_tremor" -> "Zehahaha! Black Vortex! Quake Crash!"
+            "madara_uchiha" -> "Wake up to reality! Perfect Susanoo!"
+            "kujo_star" -> "Star Platinum: The World! Time has stopped! ORA ORA ORA!"
+            "dio_world" -> "ZA WARUDO! Stop time! MUDA MUDA MUDA!"
+            "caped_baldy" -> "Serious Series: Serious Punch!"
+            "alucard_hellsing" -> "Release Control Art Restriction Level Zero!"
+            "meruem_chimera" -> "Kneel before the King of Evolution!"
+            "guts_berserk" -> "Berserker Armor! Dragon Slayer Crush!"
+            "griffith_femto" -> "Wings of Darkness! Eclipse Gravity!"
+            "sukuna_shrine" -> "Domain Expansion: Malevolent Shrine! Cleave!"
+            "naruto_baryon" -> "Baryon Mode! Rasengan Barrage!"
+            "sasuke_rinnegan" -> "Perfect Susanoo! Indra's Arrow!"
+            "giorno_requiem" -> "Gold Experience Requiem! Return to Zero! MUDA MUDA MUDA!"
+            "diavolo_crimson" -> "King Crimson! Time has been erased!"
+            "kira_killer_queen" -> "Killer Queen! Third Bomb, Bites the Dust!"
+            "pucci_heaven" -> "Made in Heaven! Time accelerates!"
+            "joseph_hamon" -> "Hermit Purple! Sunlight Yellow Overdrive!"
+            "kars_ultimate" -> "Ultimate Lifeform! Red Stone Dawn!"
+            "meliodas_wrath" -> "Assault Mode! Full Counter!"
+            else -> voiceLine
         }
 
     companion object {

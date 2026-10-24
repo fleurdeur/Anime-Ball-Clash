@@ -46,6 +46,14 @@ import com.example.model.MatchStatistics
 import com.example.model.PlayerProfile
 import com.example.ui.components.AnimeBallRenderer
 import com.example.ui.theme.AppTheme
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 
 @Composable
 fun ResultScreen(
@@ -53,41 +61,62 @@ fun ResultScreen(
     profile: PlayerProfile,
     onRematch: () -> Unit,
     onCharacterSelect: () -> Unit,
-    onHomeHub: () -> Unit
+    onHomeHub: () -> Unit,
+    onBack: () -> Unit = onHomeHub
 ) {
     val palette = AppTheme.palette
-    BackHandler { onHomeHub() }
+    BackHandler { onBack() }
 
     val playerChar = remember(stats.playerCharacterId) {
         CharacterRoster.getById(stats.playerCharacterId)
     }
 
+    val heroScale = remember { Animatable(0.84f) }
+    LaunchedEffect(stats.playerCharacterId, stats.isPlayerWinner) {
+        heroScale.snapTo(0.84f)
+        heroScale.animateTo(
+            targetValue = 1f,
+            animationSpec = spring(
+                dampingRatio = Spring.DampingRatioMediumBouncy,
+                stiffness = Spring.StiffnessLow
+            )
+        )
+    }
+
     val bannerBg = if (stats.isPlayerWinner) palette.greenAccentSoft else palette.primaryAccentSoft
     val bannerFg = if (stats.isPlayerWinner) palette.greenAccent else palette.primaryAccent
 
-    Box(
+    BoxWithConstraints(
         modifier = Modifier
             .fillMaxSize()
             .background(palette.background)
             .systemBarsPadding(),
         contentAlignment = Alignment.TopCenter
     ) {
+        val compactScreen = maxWidth < 360.dp || maxHeight < 640.dp
+        val outerRingSize = if (compactScreen) 98.dp else 118.dp
+        val avatarSize = if (compactScreen) 86.dp else 104.dp
+
         Column(
             modifier = Modifier
                 .widthIn(max = 520.dp)
                 .fillMaxSize()
                 .verticalScroll(rememberScrollState())
-                .padding(20.dp)
+                .padding(horizontal = if (compactScreen) 14.dp else 20.dp, vertical = 16.dp)
                 .testTag("result_screen"),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+            verticalArrangement = Arrangement.spacedBy(if (compactScreen) 12.dp else 16.dp)
         ) {
-            Spacer(modifier = Modifier.height(6.dp))
+            Spacer(modifier = Modifier.height(4.dp))
 
             Surface(
                 color = bannerBg,
                 shape = RoundedCornerShape(50),
-                border = BorderStroke(1.dp, bannerFg.copy(alpha = 0.35f))
+                border = BorderStroke(1.dp, bannerFg.copy(alpha = 0.35f)),
+                modifier = Modifier.graphicsLayer {
+                    scaleX = heroScale.value
+                    scaleY = heroScale.value
+                }
             ) {
                 Text(
                     text = if (stats.isPlayerWinner) "YOU WIN!" else "YOU LOSE",
@@ -99,13 +128,17 @@ fun ResultScreen(
 
             Box(
                 modifier = Modifier
-                    .size(118.dp)
+                    .size(outerRingSize)
+                    .graphicsLayer {
+                        scaleX = heroScale.value
+                        scaleY = heroScale.value
+                    }
                     .clip(CircleShape)
                     .background(palette.stageSurface)
                     .border(1.dp, palette.stageLine, CircleShape),
                 contentAlignment = Alignment.Center
             ) {
-                Canvas(modifier = Modifier.size(104.dp)) {
+                Canvas(modifier = Modifier.size(avatarSize)) {
                     AnimeBallRenderer.drawPreviewAvatar(
                         scope = this,
                         character = playerChar,
@@ -118,12 +151,14 @@ fun ResultScreen(
             Text(
                 text = "${stats.playerCharacterName} vs ${stats.opponentCharacterName}",
                 style = MaterialTheme.typography.displayMedium,
-                color = palette.textPrimary
+                color = palette.textPrimary,
+                textAlign = TextAlign.Center
             )
             Text(
-                text = "Final HP: ${stats.playerFinalHp} – ${stats.opponentFinalHp} • ${stats.matchDurationSeconds}s clash",
+                text = "Final HP: ${stats.playerFinalHp} – ${stats.opponentFinalHp} • ${stats.matchDurationSeconds}s fight",
                 style = MaterialTheme.typography.bodyMedium,
-                color = palette.textSecondary
+                color = palette.textSecondary,
+                textAlign = TextAlign.Center
             )
 
             Surface(
@@ -132,7 +167,7 @@ fun ResultScreen(
                 border = BorderStroke(1.dp, palette.border),
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Column(modifier = Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text("Rewards", style = MaterialTheme.typography.titleLarge, color = palette.textPrimary)
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -156,8 +191,8 @@ fun ResultScreen(
                 border = BorderStroke(1.dp, palette.border),
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Column(modifier = Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("Match Stats", style = MaterialTheme.typography.titleLarge, color = palette.textPrimary)
+                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("Fight Summary", style = MaterialTheme.typography.titleLarge, color = palette.textPrimary)
                     MetricRow("Damage Done", "${stats.damageDealt} HP")
                     HorizontalDivider(color = palette.border)
                     MetricRow("Damage Taken", "${stats.damageTaken} HP")
@@ -185,7 +220,13 @@ fun ResultScreen(
                 ) {
                     Icon(Icons.Default.Home, contentDescription = null, tint = palette.textPrimary)
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("Home", color = palette.textPrimary, style = MaterialTheme.typography.labelLarge)
+                    Text(
+                        "Home",
+                        color = palette.textPrimary,
+                        style = MaterialTheme.typography.labelLarge,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
                 }
 
                 Button(
@@ -199,7 +240,13 @@ fun ResultScreen(
                 ) {
                     Icon(Icons.Default.Replay, contentDescription = null)
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("Play Again", style = MaterialTheme.typography.titleMedium, color = Color.White)
+                    Text(
+                        "Play Again",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = Color.White,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
                 }
             }
 

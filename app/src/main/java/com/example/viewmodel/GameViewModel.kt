@@ -8,6 +8,7 @@ import android.os.Vibrator
 import android.os.VibratorManager
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.audio.BattleAudioDirector
 import com.example.audio.SoundManager
 import com.example.model.AppScreen
 import com.example.model.AppThemeMode
@@ -47,6 +48,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.launch
 import kotlin.math.max
+import kotlin.math.min
+import kotlin.random.Random
 
 data class BattleHudState(
     val playerHp: Int = 360,
@@ -67,6 +70,16 @@ data class BattleHudState(
     val opponentUltMaxCooldownSec: Float = 8f,
     val redirectReady: Boolean = true,
     val redirectHalfSecsLeft: Int = 0,
+    val isMultiDashActive: Boolean = false,
+    val canTriggerCounter: Boolean = true,
+    val isPlayerCounterActive: Boolean = false,
+    val playerCounterActiveHalfSecs: Int = 0,
+    val playerCounterCooldownHalfSecs: Int = 0,
+    val playerCounterMaxDurationSec: Float = 1.15f,
+    val playerCounterMaxCooldownSec: Float = 2.8f,
+    val counterLabel: String = "Block",
+    val autoCounterPercent: Int = 30,
+    val isAutoCounterShielded: Boolean = false,
     val lastImpactBanner: String = ""
 )
 
@@ -87,6 +100,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     val soundManager = SoundManager(application)
+    val battleAudioDirector = BattleAudioDirector(application)
     private val lanManager = LanMultiplayerManager(application)
 
     private var onlineRepository: OnlineArenaRepository? = null
@@ -95,6 +109,11 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _currentScreen = MutableStateFlow(AppScreen.LOADING)
     val currentScreen: StateFlow<AppScreen> = _currentScreen.asStateFlow()
+
+    private val _lastNavWasPop = MutableStateFlow(false)
+    val lastNavWasPop: StateFlow<Boolean> = _lastNavWasPop.asStateFlow()
+    private val navBackStack = ArrayDeque<AppScreen>()
+    private var battleOriginScreen: AppScreen = AppScreen.HOME_HUB
 
     private val _engineSettings = MutableStateFlow(loadEngineSettings())
     val engineSettings: StateFlow<EngineSettings> = _engineSettings.asStateFlow()
@@ -110,6 +129,9 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _quests = MutableStateFlow(loadQuests())
     val quests: StateFlow<List<QuestItem>> = _quests.asStateFlow()
+
+    private val _dailyQuests = MutableStateFlow(loadDailyQuests())
+    val dailyQuests: StateFlow<List<QuestItem>> = _dailyQuests.asStateFlow()
 
     private val _leaderboard = MutableStateFlow(InitialGameData.buildLeaderboard(_playerProfile.value))
     val leaderboard: StateFlow<List<LeaderboardEntry>> = _leaderboard.asStateFlow()
@@ -167,8 +189,12 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     private var maxComboInMatch = 0
     private var wallBouncesInMatch = 0
     private var ultimatesUsedInMatch = 0
+    private var countersUsedInMatch = 0
     private var matchStartMillis = 0L
     private var latestBannerText = ""
+
+    private var isBattlePaused = false
+    private var isAppInForeground = true
 
     private var matchmakingJob: Job? = null
     private var leaderboardObserverJob: Job? = null
@@ -180,16 +206,24 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
 
     private var activeFirestoreRoomId: String? = null
     private var isFirestoreHost = false
+    private var activeHostUid: String = ""
+    private var activeGuestUid: String = ""
+    private var activeMatchSeed: Int = 12345
     private var localCmdSeq = 0
     private var localLastDirX = 0f
     private var localLastDirY = -1f
     private var localUltSeq = 0
+    private var localCounterSeq = 0
     private var lastAppliedRemoteCmdSeq = 0
     private var lastAppliedRemoteUltSeq = 0
+    private var lastAppliedRemoteCounterSeq = 0
+    private var lastAppliedPackedSync = ""
     private var firestoreSyncAccumulator = 0f
 
     init {
         soundManager.isEnabled = _engineSettings.value.sfxEnabled
+        battleAudioDirector.sfxEnabled = _engineSettings.value.sfxEnabled
+        battleAudioDirector.musicEnabled = _engineSettings.value.musicEnabled
         observeLanEvents()
         viewModelScope.launch {
             delay(650)
@@ -202,6 +236,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     override fun onCleared() {
         cleanupActiveNetworkSession()
         leaderboardObserverJob?.cancel()
+        battleAudioDirector.release()
         soundManager.release()
         super.onCleared()
     }
@@ -305,7 +340,12 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun navigateTo(screen: AppScreen) {
+    fun navigateTo(screen: AppScreen, recordHistory: Boolean = true) {
+        val previous = _currentScreen.value
+        if (previous == screen) return
+
+        refreshDailyQuestsIfNeeded()
+
         if (screen != AppScreen.MATCHMAKING && screen != AppScreen.BATTLE_ARENA && screen != AppScreen.MULTIPLAYER_LOBBY) {
             cleanupActiveNetworkSession()
         }
@@ -317,8 +357,166 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
             _localIpAddress.value = lanManager.detectLocalIpv4()
             _lobbyStatusMessage.value = null
         }
+
+        if (recordHistory &&
+            previous != AppScreen.LOADING &&
+            previous != AppScreen.MATCHMAKING &&
+            previous != AppScreen.BATTLE_ARENA &&
+            previous != AppScreen.RESULT
+        ) {
+            if (navBackStack.lastOrNull() != previous) {
+                navBackStack.addLast(previous)
+                while (navBackStack.size > 16) {
+                    navBackStack.removeFirst()
+                }
+            }
+        }
+
+        _lastNavWasPop.value = false
+        isBattlePaused = false
         soundManager.playUiTap()
         _currentScreen.value = screen
+        syncAudioDirectorWithState()
+    }
+
+    fun navigateToHomeReset() {
+        navBackStack.clear()
+        battleOriginScreen = AppScreen.HOME_HUB
+        cleanupActiveNetworkSession()
+        matchmakingJob?.cancel()
+        _canStartRankedChallenger.value = false
+        _lastNavWasPop.value = true
+        isBattlePaused = false
+        soundManager.playUiTap()
+        _currentScreen.value = AppScreen.HOME_HUB
+        syncAudioDirectorWithState()
+    }
+
+    /**
+     * Steps back one action/screen in history rather than jumping straight to HomeHub.
+     * Returns true if handled internally, or false if already at root so Activity can exit naturally.
+     */
+    fun navigateBack(): Boolean {
+        val current = _currentScreen.value
+        if (current == AppScreen.LOADING) return true
+
+        if (current == AppScreen.MATCHMAKING) {
+            cleanupActiveNetworkSession()
+            matchmakingJob?.cancel()
+            _canStartRankedChallenger.value = false
+            _lastNavWasPop.value = true
+            isBattlePaused = false
+            soundManager.playUiTap()
+            _currentScreen.value = battleOriginScreen
+            syncAudioDirectorWithState()
+            return true
+        }
+
+        if (current == AppScreen.BATTLE_ARENA) {
+            forfeitAndExitArena(toOrigin = true)
+            return true
+        }
+
+        if (current == AppScreen.RESULT) {
+            cleanupActiveNetworkSession()
+            _lastNavWasPop.value = true
+            isBattlePaused = false
+            soundManager.playUiTap()
+            _currentScreen.value = battleOriginScreen
+            syncAudioDirectorWithState()
+            return true
+        }
+
+        while (navBackStack.isNotEmpty() && navBackStack.last() == current) {
+            navBackStack.removeLast()
+        }
+
+        if (navBackStack.isNotEmpty()) {
+            val target = navBackStack.removeLast()
+            if (target != AppScreen.MULTIPLAYER_LOBBY) {
+                cleanupActiveNetworkSession()
+            }
+            _lastNavWasPop.value = true
+            soundManager.playUiTap()
+            _currentScreen.value = target
+            syncAudioDirectorWithState()
+            return true
+        }
+
+        if (current != AppScreen.HOME_HUB) {
+            cleanupActiveNetworkSession()
+            _lastNavWasPop.value = true
+            soundManager.playUiTap()
+            _currentScreen.value = AppScreen.HOME_HUB
+            syncAudioDirectorWithState()
+            return true
+        }
+
+        return false
+    }
+
+    fun forfeitAndExitArena(toOrigin: Boolean = true) {
+        val roomId = activeFirestoreRoomId
+        val repo = onlineRepository
+        val sim = _battleSim.value
+        if (activeTransport == ActiveTransport.FIRESTORE && roomId != null && repo != null && sim?.isRoundActive == true) {
+            if (isFirestoreHost) {
+                val winner = activeGuestUid.ifBlank { boundUserId.orEmpty() }
+                if (winner.isNotBlank()) {
+                    pushFirestoreCombatStateAsync(status = "finished", winnerUid = winner)
+                }
+            } else if (activeHostUid.isNotBlank()) {
+                viewModelScope.launch {
+                    repo.sendGuestForfeit(roomId, activeHostUid)
+                }
+            }
+        }
+        sim?.isRoundActive = false
+        cleanupActiveNetworkSession()
+        isBattlePaused = false
+        _lastNavWasPop.value = true
+        soundManager.playUiTap()
+        _currentScreen.value = if (toOrigin) battleOriginScreen else AppScreen.HOME_HUB
+        syncAudioDirectorWithState()
+    }
+
+    fun setBattlePaused(paused: Boolean) {
+        isBattlePaused = paused
+        syncAudioDirectorWithState()
+    }
+
+    fun onAppPause() {
+        isAppInForeground = false
+        battleAudioDirector.stopBattleMusic()
+    }
+
+    fun onAppResume() {
+        isAppInForeground = true
+        refreshDailyQuestsIfNeeded()
+        syncAudioDirectorWithState()
+    }
+
+    private fun syncAudioDirectorWithState() {
+        val sim = _battleSim.value
+        val inLiveArena = isAppInForeground &&
+            !isBattlePaused &&
+            _currentScreen.value == AppScreen.BATTLE_ARENA &&
+            sim != null &&
+            sim.isRoundActive &&
+            _turnState.value != TurnState.KNOCKOUT_SLOWMO
+
+        if (inLiveArena && sim != null) {
+            val pRatio = (sim.playerBall.currentHp / sim.playerBall.maxHp.coerceAtLeast(1f)).coerceIn(0f, 1f)
+            val oRatio = (sim.opponentBall.currentHp / sim.opponentBall.maxHp.coerceAtLeast(1f)).coerceIn(0f, 1f)
+            battleAudioDirector.updateBattleSituation(
+                inBattleArena = true,
+                isClashStarted = sim.isClashStarted,
+                eitherUltimateActive = sim.playerBall.isUltimateActive || sim.opponentBall.isUltimateActive,
+                lowestHpRatio = min(pRatio, oRatio)
+            )
+        } else {
+            battleAudioDirector.stopBattleMusic()
+        }
     }
 
     fun setBotDifficulty(difficulty: BotDifficulty) {
@@ -333,13 +531,17 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
 
     fun startCustomMatch() {
         cleanupActiveNetworkSession()
+        battleOriginScreen = AppScreen.CUSTOM_MATCH
+        activeMatchSeed = Random.nextInt(10_000, 999_999)
         _selectedMode.value = GameMode.CUSTOM_MATCH
         val rival = _customOpponentCharacter.value
         _opponentCharacter.value = rival
         _opponentName.value = "${_botDifficulty.value.shortLabel} ${rival.name}"
+        _lastNavWasPop.value = false
         soundManager.playUiTap()
         _currentScreen.value = AppScreen.MATCHMAKING
         _canStartRankedChallenger.value = false
+        syncAudioDirectorWithState()
 
         matchmakingJob?.cancel()
         matchmakingJob = viewModelScope.launch {
@@ -349,6 +551,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
             delay(400)
             setupBattle(isRemote = false, remoteUpgrades = null)
             _currentScreen.value = AppScreen.BATTLE_ARENA
+            syncAudioDirectorWithState()
         }
     }
 
@@ -429,6 +632,14 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
                         }
                     }
 
+                    LanPacket.TriggerCounter -> {
+                        if (!sim.opponentBall.isCounterActive) {
+                            sim.opponentBall.counterCooldownRemaining = 0f
+                            sim.triggerCounter(sim.opponentBall)
+                            syncHudState(sim, force = true)
+                        }
+                    }
+
                     is LanPacket.HostStateSync -> {
                         if (!isLanHost && sim.isRoundActive) {
                             if (_turnState.value == TurnState.AIM_OPENING) {
@@ -455,25 +666,24 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
                     is LanPacket.Knockout -> {
                         if (sim.isRoundActive) {
                             val didLocalWin = if (isLanHost) pkt.hostWon else !pkt.hostWon
-                            sim.isRoundActive = false
-                            if (didLocalWin) {
-                                sim.opponentBall.currentHp = 0f
-                            } else {
-                                sim.playerBall.currentHp = 0f
-                            }
-                            _turnState.value = TurnState.KNOCKOUT_SLOWMO
-                            soundManager.playKnockout()
-                            handleMatchEnd(didLocalWin)
+                            val localFinalHp = if (isLanHost) pkt.hostFinalHp else pkt.guestFinalHp
+                            val oppFinalHp = if (isLanHost) pkt.guestFinalHp else pkt.hostFinalHp
+                            sim.forceAuthoritativeFinish(
+                                isPlayerWinner = didLocalWin,
+                                finalPlayerHp = localFinalHp,
+                                finalOpponentHp = oppFinalHp
+                            )
                         }
                     }
 
                     LanPacket.PeerDisconnected -> {
                         if (_currentScreen.value == AppScreen.BATTLE_ARENA && sim.isRoundActive) {
-                            latestBannerText = "FRIEND DISCONNECTED • YOU WIN"
-                            sim.isRoundActive = false
-                            sim.opponentBall.currentHp = 0f
-                            _turnState.value = TurnState.KNOCKOUT_SLOWMO
-                            handleMatchEnd(true)
+                            latestBannerText = "FRIEND LEFT • YOU WIN"
+                            sim.forceAuthoritativeFinish(
+                                isPlayerWinner = true,
+                                finalPlayerHp = max(1f, sim.playerBall.currentHp),
+                                finalOpponentHp = 0f
+                            )
                         }
                     }
                 }
@@ -485,11 +695,15 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         activeTransport = ActiveTransport.LAN
         isLanHost = isHost
         lanSyncAccumulator = 0f
+        battleOriginScreen = AppScreen.MULTIPLAYER_LOBBY
+        activeMatchSeed = (peer.username.hashCode() xor _playerProfile.value.username.hashCode()) and 0x7FFFFFFF
         _selectedMode.value = GameMode.MULTIPLAYER
         _opponentName.value = peer.username
         _opponentCharacter.value = CharacterRoster.getById(peer.characterId)
+        _lastNavWasPop.value = false
         setupBattle(isRemote = true, remoteUpgrades = peer.upgrades)
         _currentScreen.value = AppScreen.BATTLE_ARENA
+        syncAudioDirectorWithState()
     }
 
     // ==================== INTERNET ROOM CODE & ONLINE RANKED ====================
@@ -575,6 +789,8 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun handleIncomingFirestoreRoomSnapshot(room: MatchRoomDoc, mode: GameMode) {
         val uid = boundUserId ?: return
+        activeHostUid = room.hostUid
+        activeGuestUid = room.guestUid
 
         // Host waiting in lobby or ranked queue -> guest just joined!
         if (activeTransport != ActiveTransport.FIRESTORE &&
@@ -595,7 +811,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         val remoteDirX = if (isFirestoreHost) room.guestDirX else room.hostDirX
         val remoteDirY = if (isFirestoreHost) room.guestDirY else room.hostDirY
         val remoteUltSeq = if (isFirestoreHost) room.guestUltSeq else room.hostUltSeq
-        val remoteReportedHp = if (isFirestoreHost) room.guestSyncHp else room.hostSyncHp
+        val remoteCounterSeq = if (isFirestoreHost) room.guestCounterSeq else room.hostCounterSeq
 
         if (remoteCmdSeq > lastAppliedRemoteCmdSeq) {
             val isFirstMove = lastAppliedRemoteCmdSeq == 0 && !sim.isClashStarted
@@ -617,33 +833,60 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
 
-        if (sim.isRoundActive && sim.isClashStarted && remoteReportedHp > 0) {
-            val blended = (sim.opponentBall.currentHp * 0.5f) + (remoteReportedHp.toFloat() * 0.5f)
-            sim.opponentBall.currentHp = blended.coerceIn(1f, sim.opponentBall.maxHp)
+        if (remoteCounterSeq > lastAppliedRemoteCounterSeq) {
+            lastAppliedRemoteCounterSeq = remoteCounterSeq
+            if (!sim.opponentBall.isCounterActive) {
+                sim.opponentBall.counterCooldownRemaining = 0f
+                sim.triggerCounter(sim.opponentBall)
+                syncHudState(sim, force = true)
+            }
+        }
+
+        // Zero-desync Host-Authoritative State Reconciliation on Guest
+        if (!isFirestoreHost && sim.isRoundActive && room.syncStatePacked.isNotBlank() && room.syncStatePacked != lastAppliedPackedSync) {
+            lastAppliedPackedSync = room.syncStatePacked
+            if (_turnState.value == TurnState.AIM_OPENING) {
+                _turnState.value = TurnState.NONSTOP_CLASH
+            }
+            sim.applyPackedHostSyncOnGuest(room.syncStatePacked)
+            syncHudState(sim, force = false)
+        } else if (!isFirestoreHost && sim.isRoundActive && sim.isClashStarted) {
+            // Ensure HP stays locked to Host's authoritative HP even before packed state arrives
+            if (room.guestSyncHp >= 0) {
+                sim.playerBall.currentHp = room.guestSyncHp.toFloat().coerceIn(0f, sim.playerBall.maxHp)
+            }
+            if (room.hostSyncHp >= 0) {
+                sim.opponentBall.currentHp = room.hostSyncHp.toFloat().coerceIn(0f, sim.opponentBall.maxHp)
+            }
         }
 
         if (room.status == "finished" && room.winnerUid.isNotEmpty() && sim.isRoundActive) {
             val didWin = room.winnerUid == uid
-            sim.isRoundActive = false
-            if (didWin) {
-                sim.opponentBall.currentHp = 0f
-            } else {
-                sim.playerBall.currentHp = 0f
-            }
-            _turnState.value = TurnState.KNOCKOUT_SLOWMO
-            soundManager.playKnockout()
-            handleMatchEnd(didWin)
+            val myFinalHp = if (isFirestoreHost) room.hostSyncHp.toFloat() else room.guestSyncHp.toFloat()
+            val oppFinalHp = if (isFirestoreHost) room.guestSyncHp.toFloat() else room.hostSyncHp.toFloat()
+            sim.forceAuthoritativeFinish(
+                isPlayerWinner = didWin,
+                finalPlayerHp = myFinalHp,
+                finalOpponentHp = oppFinalHp
+            )
         }
     }
 
     private fun startFirestoreMultiplayerBattle(room: MatchRoomDoc, mode: GameMode) {
         activeTransport = ActiveTransport.FIRESTORE
         activeFirestoreRoomId = room.roomId
+        activeHostUid = room.hostUid
+        activeGuestUid = room.guestUid
+        activeMatchSeed = room.seed
         localCmdSeq = 0
         localUltSeq = 0
+        localCounterSeq = 0
         lastAppliedRemoteCmdSeq = 0
         lastAppliedRemoteUltSeq = 0
+        lastAppliedRemoteCounterSeq = 0
+        lastAppliedPackedSync = ""
         firestoreSyncAccumulator = 0f
+        battleOriginScreen = if (mode == GameMode.MULTIPLAYER) AppScreen.MULTIPLAYER_LOBBY else AppScreen.HOME_HUB
         _selectedMode.value = mode
 
         val oppName = if (isFirestoreHost) room.guestName.ifBlank { "Online Rival" } else room.hostName.ifBlank { "Online Rival" }
@@ -656,8 +899,10 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
 
         _opponentName.value = oppName
         _opponentCharacter.value = CharacterRoster.getById(oppCharId)
+        _lastNavWasPop.value = false
         setupBattle(isRemote = true, remoteUpgrades = oppUpg)
         _currentScreen.value = AppScreen.BATTLE_ARENA
+        syncAudioDirectorWithState()
     }
 
     private fun pushFirestoreCombatStateAsync(status: String = "active", winnerUid: String = "") {
@@ -670,7 +915,9 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         val dx = localLastDirX
         val dy = localLastDirY
         val ult = localUltSeq
+        val ctr = localCounterSeq
         val hostFlag = isFirestoreHost
+        val packed = if (hostFlag && sim.isArenaInitialized) sim.packHostSyncState() else ""
 
         viewModelScope.launch {
             try {
@@ -684,7 +931,9 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
                         hostSyncHp = myHp,
                         guestSyncHp = oppHp,
                         status = status,
-                        winnerUid = winnerUid
+                        winnerUid = winnerUid,
+                        counterSeq = ctr,
+                        syncStatePacked = packed
                     )
                 } else {
                     repo.sendGuestCombatUpdate(
@@ -693,9 +942,10 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
                         dirX = dx,
                         dirY = dy,
                         ultSeq = ult,
-                        guestSyncHp = myHp,
+                        guestSyncHp = null,
                         status = status,
-                        winnerUid = winnerUid
+                        winnerUid = winnerUid,
+                        counterSeq = ctr
                     )
                 }
             } catch (e: CancellationException) {
@@ -737,8 +987,11 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         val synced = newSettings.copy(bloomPostFx = newSettings.renderMode.bloomGlow)
         _engineSettings.value = synced
         soundManager.isEnabled = synced.sfxEnabled
+        battleAudioDirector.sfxEnabled = synced.sfxEnabled
+        battleAudioDirector.musicEnabled = synced.musicEnabled
         _battleSim.value?.engineSettings = synced
         persistEngineSettings(synced)
+        syncAudioDirectorWithState()
     }
 
     fun toggleSfx() {
@@ -748,6 +1001,13 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         if (next) {
             soundManager.playUiTap()
         }
+    }
+
+    fun toggleMusic() {
+        val next = !_engineSettings.value.musicEnabled
+        val updated = _engineSettings.value.copy(musicEnabled = next)
+        updateEngineSettings(updated)
+        soundManager.playUiTap()
     }
 
     fun setThemeMode(mode: AppThemeMode) {
@@ -778,6 +1038,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         _unlockedCharacterIds.value = CharacterRoster.starterIds
         _characterUpgrades.value = emptyMap()
         _quests.value = InitialGameData.defaultQuests
+        _dailyQuests.value = loadDailyQuests()
         refreshLeaderboardState()
         pushCloudSyncAsync()
         triggerHaptic(35L)
@@ -883,30 +1144,73 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun claimQuest(questId: String) {
-        val list = _quests.value.toMutableList()
-        val index = list.indexOfFirst { it.id == questId }
-        if (index != -1 && !list[index].isClaimed && list[index].currentProgress >= list[index].targetProgress) {
-            val q = list[index]
-            list[index] = q.copy(isClaimed = true)
-            _quests.value = list
-            persistQuests(list)
-
-            val profile = _playerProfile.value
-            val updated = profile.copy(
-                gold = profile.gold + q.rewardGold,
-                gems = profile.gems + q.rewardGems
-            )
-            _playerProfile.value = updated
-            prefs.edit().putInt("gold", updated.gold).putInt("gems", updated.gems).apply()
-            pushCloudSyncAsync()
-            soundManager.playUpgradeForge()
-            triggerHaptic(35L)
+        val mainList = _quests.value.toMutableList()
+        val mainIndex = mainList.indexOfFirst { it.id == questId }
+        if (mainIndex != -1 && !mainList[mainIndex].isClaimed && mainList[mainIndex].currentProgress >= mainList[mainIndex].targetProgress) {
+            val q = mainList[mainIndex]
+            mainList[mainIndex] = q.copy(isClaimed = true)
+            _quests.value = mainList
+            persistQuests(mainList)
+            awardQuestRewards(q.rewardGold, q.rewardGems)
+            return
         }
+
+        val dailyList = _dailyQuests.value.toMutableList()
+        val dailyIndex = dailyList.indexOfFirst { it.id == questId }
+        if (dailyIndex != -1 && !dailyList[dailyIndex].isClaimed && dailyList[dailyIndex].currentProgress >= dailyList[dailyIndex].targetProgress) {
+            val q = dailyList[dailyIndex]
+            dailyList[dailyIndex] = q.copy(isClaimed = true)
+            _dailyQuests.value = dailyList
+            persistDailyQuests(dailyList)
+            awardQuestRewards(q.rewardGold, q.rewardGems)
+        }
+    }
+
+    fun claimAllReadyQuests() {
+        var totalGold = 0
+        var totalGems = 0
+
+        val updatedMain = _quests.value.map { q ->
+            if (!q.isClaimed && q.currentProgress >= q.targetProgress) {
+                totalGold += q.rewardGold
+                totalGems += q.rewardGems
+                q.copy(isClaimed = true)
+            } else q
+        }
+        val updatedDaily = _dailyQuests.value.map { q ->
+            if (!q.isClaimed && q.currentProgress >= q.targetProgress) {
+                totalGold += q.rewardGold
+                totalGems += q.rewardGems
+                q.copy(isClaimed = true)
+            } else q
+        }
+
+        if (totalGold > 0 || totalGems > 0) {
+            _quests.value = updatedMain
+            _dailyQuests.value = updatedDaily
+            persistQuests(updatedMain)
+            persistDailyQuests(updatedDaily)
+            awardQuestRewards(totalGold, totalGems)
+        }
+    }
+
+    private fun awardQuestRewards(goldDelta: Int, gemsDelta: Int) {
+        val profile = _playerProfile.value
+        val updated = profile.copy(
+            gold = profile.gold + goldDelta,
+            gems = profile.gems + gemsDelta
+        )
+        _playerProfile.value = updated
+        prefs.edit().putInt("gold", updated.gold).putInt("gems", updated.gems).apply()
+        pushCloudSyncAsync()
+        soundManager.playUpgradeForge()
+        triggerHaptic(35L)
     }
 
     // ==================== MATCHMAKING & ARENA LIFECYCLE ====================
 
     fun startMatchmaking(mode: GameMode, difficulty: BotDifficulty = _botDifficulty.value) {
+        refreshDailyQuestsIfNeeded()
         if (mode == GameMode.CUSTOM_MATCH) {
             _botDifficulty.value = difficulty
             startCustomMatch()
@@ -917,12 +1221,20 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
 
+        val current = _currentScreen.value
+        if (current != AppScreen.MATCHMAKING && current != AppScreen.BATTLE_ARENA && current != AppScreen.RESULT && current != AppScreen.LOADING) {
+            battleOriginScreen = current
+        }
+
         cleanupActiveNetworkSession()
+        activeMatchSeed = Random.nextInt(10_000, 999_999)
         _selectedMode.value = mode
         _botDifficulty.value = difficulty
         _canStartRankedChallenger.value = false
+        _lastNavWasPop.value = false
         soundManager.playUiTap()
         _currentScreen.value = AppScreen.MATCHMAKING
+        syncAudioDirectorWithState()
 
         val playerChar = CharacterRoster.getById(_playerProfile.value.selectedCharacterId)
         val candidates = CharacterRoster.characters.filter { it.id != playerChar.id }
@@ -958,6 +1270,8 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
                             is RankedQueueResult.HostingWaiting -> {
                                 activeFirestoreRoomId = result.room.roomId
                                 isFirestoreHost = true
+                                activeHostUid = result.room.hostUid
+                                activeMatchSeed = result.room.seed
                                 observeFirestoreMatchRoom(result.room.roomId, GameMode.ONLINE_MATCH)
                                 delay(2600)
                                 if (_currentScreen.value == AppScreen.MATCHMAKING && activeTransport != ActiveTransport.FIRESTORE) {
@@ -978,7 +1292,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
 
-        // Practice Bot mode (Normal = Hard, Hard = Extreme)
+        // Practice Bot mode (Easy = truly easy, Normal = Hard, Hard = Extreme)
         _opponentName.value = "${difficulty.shortLabel} ${oppChar.name}"
         matchmakingJob?.cancel()
         matchmakingJob = viewModelScope.launch {
@@ -988,6 +1302,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
             delay(460)
             setupBattle(isRemote = false, remoteUpgrades = null)
             _currentScreen.value = AppScreen.BATTLE_ARENA
+            syncAudioDirectorWithState()
         }
     }
 
@@ -1011,6 +1326,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
             _botDifficulty.value = if (_playerProfile.value.rankedRating >= 400) BotDifficulty.HARD else BotDifficulty.MEDIUM
             setupBattle(isRemote = false, remoteUpgrades = null)
             _currentScreen.value = AppScreen.BATTLE_ARENA
+            syncAudioDirectorWithState()
         }
     }
 
@@ -1020,7 +1336,9 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         maxComboInMatch = 0
         wallBouncesInMatch = 0
         ultimatesUsedInMatch = 0
+        countersUsedInMatch = 0
         latestBannerText = ""
+        isBattlePaused = false
         matchStartMillis = System.currentTimeMillis()
 
         val playerChar = CharacterRoster.getById(_playerProfile.value.selectedCharacterId)
@@ -1067,12 +1385,18 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         )
 
         val rivalTag = if (isRemote) "RIVAL" else "BOT"
+        val isGuest = isRemote && (
+            (activeTransport == ActiveTransport.LAN && !isLanHost) ||
+                (activeTransport == ActiveTransport.FIRESTORE && !isFirestoreHost)
+            )
 
         val sim = BattleSimulation(
             playerBall = pBall,
             opponentBall = oBall,
             engineSettings = _engineSettings.value,
             isRemoteMultiplayer = isRemote,
+            isGuestClient = isGuest,
+            randomSeed = activeMatchSeed,
             onCollisionImpact = { isPlayerAttacker, damage, isCrit, passiveLabel ->
                 soundManager.playBallClash(isCrit)
                 triggerHaptic(if (isCrit) 55L else 25L)
@@ -1092,24 +1416,30 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
             },
             onKnockout = { isPlayerWinner ->
                 _turnState.value = TurnState.KNOCKOUT_SLOWMO
+                battleAudioDirector.stopBattleMusic()
                 soundManager.playKnockout()
                 triggerHaptic(140L)
                 if (activeTransport == ActiveTransport.LAN && isLanHost) {
-                    lanManager.sendKnockout(hostWon = isPlayerWinner)
-                } else if (activeTransport == ActiveTransport.FIRESTORE) {
-                    val uid = boundUserId.orEmpty()
-                    val winner = if (isPlayerWinner) uid else "remote"
-                    if (isFirestoreHost || !isPlayerWinner) {
-                        pushFirestoreCombatStateAsync(status = "finished", winnerUid = winner)
+                    lanManager.sendKnockout(
+                        hostWon = isPlayerWinner,
+                        hostFinalHp = pBall.currentHp,
+                        guestFinalHp = oBall.currentHp
+                    )
+                } else if (activeTransport == ActiveTransport.FIRESTORE && isFirestoreHost) {
+                    val winnerUid = if (isPlayerWinner) activeHostUid else activeGuestUid
+                    if (winnerUid.isNotEmpty()) {
+                        pushFirestoreCombatStateAsync(status = "finished", winnerUid = winnerUid)
                     }
                 }
                 handleMatchEnd(isPlayerWinner)
             },
             onUltimateActivated = { isPlayer, ultName ->
                 soundManager.playAwakening(isPlayer)
+                val speakingChar = if (isPlayer) playerChar else oppChar
+                battleAudioDirector.speakUltimateVoiceLine(speakingChar, isPlayer)
                 triggerHaptic(80L)
                 latestBannerText = if (isPlayer) {
-                    "YOU USED $ultName!"
+                    "ULTIMATE: $ultName • MULTI-DASH!"
                 } else {
                     "$rivalTag USED $ultName!"
                 }
@@ -1123,8 +1453,18 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
                 if (isPlayer) {
                     soundManager.playRedirectDash()
                 }
+            },
+            onCounterActivated = { isPlayer, counterName ->
+                soundManager.playCounterParry()
+                triggerHaptic(if (isPlayer) 42L else 18L)
+                if (isPlayer) {
+                    countersUsedInMatch++
+                }
+                val who = if (isPlayer) "YOU" else rivalTag
+                latestBannerText = "$who AUTO: $counterName!"
             }
         )
+        sim.activeBotDifficulty = _botDifficulty.value
 
         _battleSim.value = sim
         _turnState.value = TurnState.AIM_OPENING
@@ -1132,6 +1472,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun stepBattleFrame(dt: Float) {
+        if (isBattlePaused) return
         val sim = _battleSim.value ?: return
         if (!sim.isArenaInitialized) return
 
@@ -1162,9 +1503,9 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
                         guestUlt = sim.opponentBall.ultimateGauge
                     )
                 }
-            } else if (activeTransport == ActiveTransport.FIRESTORE) {
+            } else if (activeTransport == ActiveTransport.FIRESTORE && isFirestoreHost) {
                 firestoreSyncAccumulator += dt
-                if (firestoreSyncAccumulator >= 0.35f) {
+                if (firestoreSyncAccumulator >= 0.24f) {
                     firestoreSyncAccumulator = 0f
                     pushFirestoreCombatStateAsync()
                 }
@@ -1175,6 +1516,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun onPlayerLaunch(dragVector: Vector2, maxPullPx: Float) {
+        if (isBattlePaused) return
         val sim = _battleSim.value ?: return
         if (!sim.isRoundActive) return
 
@@ -1205,6 +1547,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun onQuickLaunchOpening() {
+        if (isBattlePaused) return
         val sim = _battleSim.value ?: return
         if (_turnState.value != TurnState.AIM_OPENING || !sim.isRoundActive) return
         val toEnemy = (sim.opponentBall.position - sim.playerBall.position).rotate(0.28f).normalized()
@@ -1217,6 +1560,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun onPlayerTriggerUltimate() {
+        if (isBattlePaused) return
         val sim = _battleSim.value ?: return
         if (!sim.isRoundActive) return
         if (sim.triggerUltimate(sim.playerBall)) {
@@ -1225,6 +1569,22 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
                 lanManager.sendUltimate()
             } else if (activeTransport == ActiveTransport.FIRESTORE) {
                 localUltSeq++
+                pushFirestoreCombatStateAsync()
+            }
+            syncHudState(sim, force = true)
+        }
+    }
+
+    fun onPlayerTriggerCounter() {
+        if (isBattlePaused) return
+        val sim = _battleSim.value ?: return
+        if (!sim.isRoundActive) return
+        if (sim.triggerCounter(sim.playerBall)) {
+            countersUsedInMatch++
+            if (activeTransport == ActiveTransport.LAN) {
+                lanManager.sendCounter()
+            } else if (activeTransport == ActiveTransport.FIRESTORE) {
+                localCounterSeq++
                 pushFirestoreCombatStateAsync()
             }
             syncHudState(sim, force = true)
@@ -1260,6 +1620,9 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
 
         val redirectHalfSecs = (sim.playerRedirectCooldown * 2f + 0.9f).toInt().coerceAtLeast(0)
 
+        val pCounterActiveHalf = if (p.isCounterActive) (p.counterActiveTimer * 2f + 0.9f).toInt().coerceAtLeast(1) else 0
+        val pCounterCdHalf = if (p.isCounterOnCooldown) (p.counterCooldownRemaining * 2f + 0.9f).toInt().coerceAtLeast(1) else 0
+
         val candidate = BattleHudState(
             playerHp = p.currentHp.toInt().coerceAtLeast(0),
             playerMaxHp = p.maxHp.toInt().coerceAtLeast(1),
@@ -1279,16 +1642,28 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
             opponentUltMaxCooldownSec = o.effectiveUltCooldownSec,
             redirectReady = sim.playerRedirectCooldown <= 0.05f,
             redirectHalfSecsLeft = redirectHalfSecs,
+            isMultiDashActive = p.isUltimateActive,
+            canTriggerCounter = p.canActivateCounter,
+            isPlayerCounterActive = p.isCounterActive,
+            playerCounterActiveHalfSecs = pCounterActiveHalf,
+            playerCounterCooldownHalfSecs = pCounterCdHalf,
+            playerCounterMaxDurationSec = p.counterDurationSec,
+            playerCounterMaxCooldownSec = p.counterCooldownSec,
+            counterLabel = p.character.counterArchetype.simpleName,
+            autoCounterPercent = p.effectiveAutoCounterPercent,
+            isAutoCounterShielded = p.isCounterActive || p.shieldVisualTimer > 0.08f,
             lastImpactBanner = latestBannerText
         )
 
         if (force || candidate != _hudState.value) {
             _hudState.value = candidate
+            syncAudioDirectorWithState()
         }
     }
 
     private fun handleMatchEnd(isPlayerWinner: Boolean) {
         val sim = _battleSim.value ?: return
+        battleAudioDirector.stopBattleMusic()
 
         val diffBonus = when (_botDifficulty.value) {
             BotDifficulty.EASY -> 0
@@ -1345,6 +1720,19 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         _quests.value = updatedQuests
         persistQuests(updatedQuests)
 
+        refreshDailyQuestsIfNeeded()
+        val updatedDaily = _dailyQuests.value.map { dq ->
+            when {
+                dq.id.startsWith("dq_play_") -> dq.copy(currentProgress = (dq.currentProgress + 1).coerceAtMost(dq.targetProgress))
+                dq.id.startsWith("dq_win_") -> if (isPlayerWinner) dq.copy(currentProgress = (dq.currentProgress + 1).coerceAtMost(dq.targetProgress)) else dq
+                dq.id.startsWith("dq_counter_") -> dq.copy(currentProgress = (dq.currentProgress + countersUsedInMatch).coerceAtMost(dq.targetProgress))
+                dq.id.startsWith("dq_ult_") -> dq.copy(currentProgress = (dq.currentProgress + ultimatesUsedInMatch).coerceAtMost(dq.targetProgress))
+                else -> dq
+            }
+        }
+        _dailyQuests.value = updatedDaily
+        persistDailyQuests(updatedDaily)
+
         val profile = _playerProfile.value
         val newGold = profile.gold + goldEarned
         val newGems = profile.gems + gemsEarned
@@ -1398,7 +1786,9 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
             delay(950)
             cleanupActiveNetworkSession()
             if (_currentScreen.value == AppScreen.BATTLE_ARENA) {
+                _lastNavWasPop.value = false
                 _currentScreen.value = AppScreen.RESULT
+                syncAudioDirectorWithState()
             }
         }
     }
@@ -1534,12 +1924,47 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         editor.apply()
     }
 
+    private fun currentEpochDay(): Long = System.currentTimeMillis() / 86_400_000L
+
+    private fun refreshDailyQuestsIfNeeded() {
+        val today = currentEpochDay()
+        val storedDay = prefs.getLong("daily_quest_epoch_day", -1L)
+        if (storedDay != today || _dailyQuests.value.isEmpty()) {
+            _dailyQuests.value = loadDailyQuests()
+        }
+    }
+
+    private fun loadDailyQuests(): List<QuestItem> {
+        val today = currentEpochDay()
+        val storedDay = prefs.getLong("daily_quest_epoch_day", -1L)
+        val seeds = InitialGameData.buildDailyQuests(today)
+        if (storedDay != today) {
+            prefs.edit().putLong("daily_quest_epoch_day", today).apply()
+            return seeds
+        }
+        return seeds.map { seed ->
+            val prog = prefs.getInt("dquest_prog_${seed.id}", 0)
+            val claimed = prefs.getBoolean("dquest_claimed_${seed.id}", false)
+            seed.copy(currentProgress = prog.coerceIn(0, seed.targetProgress), isClaimed = claimed)
+        }
+    }
+
+    private fun persistDailyQuests(daily: List<QuestItem>) {
+        val editor = prefs.edit().putLong("daily_quest_epoch_day", currentEpochDay())
+        daily.forEach { q ->
+            editor.putInt("dquest_prog_${q.id}", q.currentProgress)
+            editor.putBoolean("dquest_claimed_${q.id}", q.isClaimed)
+        }
+        editor.apply()
+    }
+
     private fun loadEngineSettings(): EngineSettings {
         val themeStr = prefs.getString("theme_mode", AppThemeMode.DARK.name) ?: AppThemeMode.DARK.name
         val renderStr = prefs.getString("render_mode", RenderMode.BALANCED.name) ?: RenderMode.BALANCED.name
         val meshStr = prefs.getString("physics_mesh", PhysicsMesh.DYNAMIC.name) ?: PhysicsMesh.DYNAMIC.name
         val fpsStr = prefs.getString("target_fps", TargetFPS.FPS_60.name) ?: TargetFPS.FPS_60.name
         val sfx = prefs.getBoolean("sfx_enabled", true)
+        val music = prefs.getBoolean("music_enabled", true)
         val haptics = prefs.getBoolean("haptics_enabled", true)
         val shake = prefs.getBoolean("screen_shake", true)
 
@@ -1554,6 +1979,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
             physicsMesh = mesh,
             targetFps = fps,
             sfxEnabled = sfx,
+            musicEnabled = music,
             hapticsEnabled = haptics,
             bloomPostFx = render.bloomGlow,
             screenShake = shake
@@ -1567,6 +1993,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
             .putString("physics_mesh", settings.physicsMesh.name)
             .putString("target_fps", settings.targetFps.name)
             .putBoolean("sfx_enabled", settings.sfxEnabled)
+            .putBoolean("music_enabled", settings.musicEnabled)
             .putBoolean("haptics_enabled", settings.hapticsEnabled)
             .putBoolean("screen_shake", settings.screenShake)
             .apply()

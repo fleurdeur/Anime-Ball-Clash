@@ -96,13 +96,19 @@ fun CharacterSelectScreen(
     onBack: () -> Unit
 ) {
     val palette = AppTheme.palette
-    BackHandler { onBack() }
-
     var searchQuery by remember { mutableStateOf("") }
     var selectedAlignment by remember { mutableStateOf<CharacterAlignment?>(null) }
     var selectedTier by remember { mutableStateOf<AnimeTier?>(null) }
     var selectedRole by remember { mutableStateOf<CharacterClass?>(null) }
     var inspectedCharacter by remember { mutableStateOf<CharacterData?>(null) }
+
+    BackHandler {
+        if (inspectedCharacter != null) {
+            inspectedCharacter = null
+        } else {
+            onBack()
+        }
+    }
 
     val filteredRoster by remember(searchQuery, selectedAlignment, selectedTier, selectedRole) {
         derivedStateOf {
@@ -115,7 +121,9 @@ fun CharacterSelectScreen(
                     char.name.contains(q, ignoreCase = true) ||
                     char.title.contains(q, ignoreCase = true) ||
                     char.animeInspiration.contains(q, ignoreCase = true) ||
-                    char.passiveName.contains(q, ignoreCase = true)
+                    char.passiveName.contains(q, ignoreCase = true) ||
+                    char.counterArchetype.simpleName.contains(q, ignoreCase = true) ||
+                    char.joJoStandStyle.standName.contains(q, ignoreCase = true)
                 matchesAlignment && matchesTier && matchesRole && matchesSearch
             }
         }
@@ -368,6 +376,21 @@ fun CharacterSelectScreen(
                             style = MaterialTheme.typography.bodyMedium,
                             color = palette.textSecondary
                         )
+                        if (char.hasStandSpirit) {
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Surface(
+                                color = palette.goldAccentSoft,
+                                shape = RoundedCornerShape(50),
+                                border = BorderStroke(1.dp, palette.goldAccent.copy(alpha = 0.45f))
+                            ) {
+                                Text(
+                                    text = "STAND: ${char.joJoStandStyle.standName} (${char.joJoStandStyle.battleCry})",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = palette.goldAccent,
+                                    modifier = Modifier.padding(horizontal = 9.dp, vertical = 3.dp)
+                                )
+                            }
+                        }
                         Spacer(modifier = Modifier.height(6.dp))
                         OutlinedButton(
                             onClick = { previewAwakened = !previewAwakened },
@@ -403,13 +426,35 @@ fun CharacterSelectScreen(
 
                 HorizontalDivider(color = palette.border)
 
+                Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                    Text(
+                        text = "Origin • ${char.animeRace.simpleName} (${char.worldScaleTier.simpleName})",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = palette.goldAccent
+                    )
+                    Text(
+                        text = char.animeRace.traitSimpleDesc,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = palette.textSecondary
+                    )
+                }
+
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text(
                         text = "Passive • ${char.passiveName} (${char.passiveArchetype.shortTag})",
                         style = MaterialTheme.typography.titleMedium,
                         color = palette.blueAccent
                     )
-                    Text(char.passiveDescription, style = MaterialTheme.typography.bodyMedium, color = palette.textSecondary)
+                    Text(char.simplePassiveSummary, style = MaterialTheme.typography.bodyMedium, color = palette.textSecondary)
+                }
+
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(
+                        text = "Auto Counter • ${char.counterArchetype.simpleName} (${char.autoCounterPercent}% Chance)",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = palette.greenAccent
+                    )
+                    Text(char.simpleAutoCounterSummary, style = MaterialTheme.typography.bodyMedium, color = palette.textSecondary)
                 }
 
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -418,7 +463,11 @@ fun CharacterSelectScreen(
                         style = MaterialTheme.typography.titleMedium,
                         color = palette.primaryAccent
                     )
-                    Text(char.ultimateDescription, style = MaterialTheme.typography.bodyMedium, color = palette.textSecondary)
+                    Text(
+                        char.simpleUltimateSummary,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = palette.textSecondary
+                    )
                 }
 
                 if (isUnlocked) {
@@ -489,7 +538,7 @@ fun CharacterSelectScreen(
                 }
 
                 Text(
-                    text = "\"${char.voiceLine}\"",
+                    text = "Ult Voice: \"${char.officialUltVoiceLine}\"",
                     style = MaterialTheme.typography.bodyMedium,
                     fontStyle = FontStyle.Italic,
                     color = palette.textMuted

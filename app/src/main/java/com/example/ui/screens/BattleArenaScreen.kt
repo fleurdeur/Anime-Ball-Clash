@@ -1,6 +1,11 @@
 package com.example.ui.screens
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -8,6 +13,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -26,7 +32,10 @@ import androidx.compose.material.icons.automirrored.outlined.VolumeOff
 import androidx.compose.material.icons.automirrored.outlined.VolumeUp
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.MusicOff
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -37,6 +46,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -84,80 +94,139 @@ fun BattleArenaScreen(
     onPlayerLaunch: (Vector2, Float) -> Unit,
     onQuickLaunchOpening: () -> Unit,
     onTriggerUltimate: () -> Unit,
+    onTriggerCounter: () -> Unit = {},
     onToggleSfx: () -> Unit,
+    onToggleMusic: () -> Unit = {},
+    onSetPaused: (Boolean) -> Unit = {},
     onSurrender: () -> Unit,
     onSaveEngineSettings: (EngineSettings) -> Unit
 ) {
-    BackHandler { onSurrender() }
-
     val palette = AppTheme.palette
     var showSettings by remember { mutableStateOf(false) }
 
-    Column(
+    DisposableEffect(Unit) {
+        onDispose {
+            onSetPaused(false)
+        }
+    }
+
+    BackHandler {
+        if (showSettings) {
+            showSettings = false
+            onSetPaused(false)
+        } else {
+            onSurrender()
+        }
+    }
+
+    BoxWithConstraints(
         modifier = Modifier
             .fillMaxSize()
             .background(palette.background)
             .systemBarsPadding()
             .padding(horizontal = 8.dp, vertical = 4.dp)
-            .testTag("battle_arena_screen"),
-        verticalArrangement = Arrangement.spacedBy(5.dp)
+            .testTag("battle_arena_screen")
     ) {
-        // 1. Compact Fixed-Height VS Strip (Player HP/Ult vs Bot HP/Ult — zero mid-fight resize!)
-        ArenaCompactTopHud(
-            playerName = simulation.playerBall.character.name,
-            opponentName = simulation.opponentBall.character.name,
-            hudState = hudState,
-            palette = palette
-        )
+        val isCompactWidth = maxWidth < 385.dp
 
-        // 2. Maximized Playfield Court (60–120 FPS isolated Canvas + floating overlays)
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .weight(1f)
-                .clip(RoundedCornerShape(18.dp))
-                .background(palette.stageSurface)
-                .border(1.dp, palette.stageLine, RoundedCornerShape(18.dp))
+        Column(
+            modifier = Modifier.fillMaxSize(),
+            verticalArrangement = Arrangement.spacedBy(5.dp)
         ) {
-            ArenaCourtCanvas(
-                simulation = simulation,
-                turnState = turnState,
-                redirectReady = hudState.redirectReady,
-                engineSettings = engineSettings,
+            // 1. Top Bar: Exit + Player vs Rival HP/Ult Strip + Settings (all 48dp touch targets)
+            ArenaTopBarWithHud(
+                playerName = simulation.playerBall.character.name,
+                opponentName = simulation.opponentBall.character.name,
+                hudState = hudState,
                 palette = palette,
-                onStepFrame = onStepFrame,
-                onPlayerLaunch = onPlayerLaunch
+                isCompactWidth = isCompactWidth,
+                onSurrender = onSurrender,
+                onOpenSettings = {
+                    showSettings = true
+                    onSetPaused(true)
+                }
             )
 
-            // Floating compact impact toast (never shifts court layout!)
-            if (hudState.lastImpactBanner.isNotEmpty()) {
-                Surface(
-                    color = palette.overlaySurface,
-                    shape = RoundedCornerShape(50),
-                    border = BorderStroke(1.dp, palette.border),
-                    modifier = Modifier
-                        .align(Alignment.TopCenter)
-                        .padding(top = 6.dp)
-                ) {
-                    Text(
-                        text = hudState.lastImpactBanner,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = palette.textPrimary,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp)
-                    )
-                }
-            }
+            // 2. Maximized Playfield Court (60–120 FPS isolated Canvas + floating overlays)
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+                    .clip(RoundedCornerShape(18.dp))
+                    .background(palette.stageSurface)
+                    .border(1.dp, palette.stageLine, RoundedCornerShape(18.dp))
+            ) {
+                ArenaCourtCanvas(
+                    simulation = simulation,
+                    turnState = turnState,
+                    redirectReady = hudState.redirectReady,
+                    engineSettings = engineSettings,
+                    palette = palette,
+                    onStepFrame = onStepFrame,
+                    onPlayerLaunch = onPlayerLaunch
+                )
 
-            // Compact Opening Shot Prompt
-            if (turnState == TurnState.AIM_OPENING) {
-                Column(
+                // Floating Dash / Multi-Dash Indicator Pill (top-start, never shifts layout)
+                Surface(
+                    color = if (hudState.isMultiDashActive) {
+                        palette.goldAccentSoft
+                    } else {
+                        palette.overlaySurface
+                    },
+                    shape = RoundedCornerShape(50),
+                    border = BorderStroke(
+                        1.dp,
+                        when {
+                            hudState.isMultiDashActive -> palette.goldAccent
+                            hudState.redirectReady && turnState == TurnState.NONSTOP_CLASH -> palette.blueAccent
+                            else -> palette.border
+                        }
+                    ),
                     modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .padding(bottom = 14.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                        .align(Alignment.TopStart)
+                        .padding(start = 8.dp, top = 6.dp)
+                        .testTag("dash_status_pill")
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(5.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(7.dp)
+                                .clip(CircleShape)
+                                .background(
+                                    when {
+                                        hudState.isMultiDashActive -> palette.goldAccent
+                                        hudState.redirectReady -> palette.blueAccent
+                                        else -> palette.textMuted
+                                    }
+                                )
+                        )
+                        Text(
+                            text = when {
+                                turnState == TurnState.AIM_OPENING -> "Aim Shot"
+                                hudState.isMultiDashActive && hudState.redirectReady -> "MULTI-DASH!"
+                                hudState.isMultiDashActive -> "Dash ${hudState.redirectHalfSecsLeft / 2f}s"
+                                hudState.redirectReady -> "Dash Ready"
+                                else -> "Dash ${hudState.redirectHalfSecsLeft / 2f}s"
+                            },
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (hudState.isMultiDashActive) palette.goldAccent else palette.textPrimary,
+                            maxLines = 1
+                        )
+                    }
+                }
+
+                // Floating compact impact banner (top-end / center-top, never shifts court layout)
+                androidx.compose.animation.AnimatedVisibility(
+                    visible = hudState.lastImpactBanner.isNotEmpty(),
+                    enter = fadeIn() + scaleIn(initialScale = 0.92f),
+                    exit = fadeOut() + scaleOut(targetScale = 0.92f),
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(top = 6.dp, end = 8.dp, start = 112.dp)
                 ) {
                     Surface(
                         color = palette.overlaySurface,
@@ -165,45 +234,73 @@ fun BattleArenaScreen(
                         border = BorderStroke(1.dp, palette.border)
                     ) {
                         Text(
-                            text = "Drag to shoot • Bounces until 0 HP",
-                            style = MaterialTheme.typography.labelMedium,
+                            text = hudState.lastImpactBanner,
+                            style = MaterialTheme.typography.labelSmall,
                             color = palette.textPrimary,
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp)
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
                         )
                     }
+                }
 
-                    Button(
-                        onClick = onQuickLaunchOpening,
-                        shape = RoundedCornerShape(50),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = palette.primaryAccent,
-                            contentColor = Color.White
-                        ),
-                        contentPadding = PaddingValues(horizontal = 18.dp, vertical = 8.dp),
+                // Compact Opening Shot Prompt
+                if (turnState == TurnState.AIM_OPENING) {
+                    Column(
                         modifier = Modifier
-                            .height(48.dp)
-                            .testTag("quick_launch_button")
+                            .align(Alignment.BottomCenter)
+                            .padding(bottom = 14.dp, start = 12.dp, end = 12.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(modifier = Modifier.width(5.dp))
-                        Text("Start Fight", style = MaterialTheme.typography.labelLarge)
+                        Surface(
+                            color = palette.overlaySurface,
+                            shape = RoundedCornerShape(50),
+                            border = BorderStroke(1.dp, palette.border)
+                        ) {
+                            Text(
+                                text = "Drag anywhere to aim & shoot • Counters trigger automatically!",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = palette.textPrimary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp)
+                            )
+                        }
+
+                        Button(
+                            onClick = onQuickLaunchOpening,
+                            shape = RoundedCornerShape(50),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = palette.primaryAccent,
+                                contentColor = Color.White
+                            ),
+                            contentPadding = PaddingValues(horizontal = 18.dp, vertical = 8.dp),
+                            modifier = Modifier
+                                .height(48.dp)
+                                .testTag("quick_launch_button")
+                        ) {
+                            Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(5.dp))
+                            Text("Start Fight", style = MaterialTheme.typography.labelLarge)
+                        }
                     }
                 }
             }
-        }
 
-        // 3. Single Compact 48dp Bottom Action Row (Exit, Sound, Settings, Dash, Ultimate)
-        ArenaCompactBottomBar(
-            ultimateName = simulation.playerBall.character.ultimateName,
-            hudState = hudState,
-            turnState = turnState,
-            sfxEnabled = engineSettings.sfxEnabled,
-            palette = palette,
-            onSurrender = onSurrender,
-            onToggleSfx = onToggleSfx,
-            onOpenSettings = { showSettings = true },
-            onTriggerUltimate = onTriggerUltimate
-        )
+            // 3. Bottom Combat Bar: Sound, Music (when space permits), Auto-Counter Status, Ultimate Ability
+            ArenaCompactBottomBar(
+                ultimateName = simulation.playerBall.character.ultimateName,
+                hudState = hudState,
+                sfxEnabled = engineSettings.sfxEnabled,
+                musicEnabled = engineSettings.musicEnabled,
+                isCompactWidth = isCompactWidth,
+                palette = palette,
+                onToggleSfx = onToggleSfx,
+                onToggleMusic = onToggleMusic,
+                onTriggerUltimate = onTriggerUltimate
+            )
+        }
     }
 
     if (showSettings) {
@@ -211,77 +308,133 @@ fun BattleArenaScreen(
             currentSettings = engineSettings,
             selectedCharacterId = simulation.playerBall.character.id,
             onSaveSettings = onSaveEngineSettings,
-            onDismiss = { showSettings = false }
+            onDismiss = {
+                showSettings = false
+                onSetPaused(false)
+            }
         )
     }
 }
 
 @Composable
-private fun ArenaCompactTopHud(
+private fun ArenaTopBarWithHud(
     playerName: String,
     opponentName: String,
     hudState: BattleHudState,
-    palette: AppPalette
+    palette: AppPalette,
+    isCompactWidth: Boolean,
+    onSurrender: () -> Unit,
+    onOpenSettings: () -> Unit
 ) {
-    Surface(
-        color = palette.cardSurface,
-        shape = RoundedCornerShape(14.dp),
-        border = BorderStroke(1.dp, palette.border),
-        modifier = Modifier.fillMaxWidth()
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 10.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        // Exit button (48dp touch target)
+        Surface(
+            color = palette.cardSurface,
+            shape = RoundedCornerShape(12.dp),
+            border = BorderStroke(1.dp, palette.border),
+            modifier = Modifier.size(48.dp)
         ) {
-            FighterHudColumn(
-                name = playerName,
-                hp = hudState.playerHp,
-                maxHp = hudState.playerMaxHp,
-                hpColor = palette.greenAccent,
-                ultPercent = hudState.playerUltPercent,
-                isUltActive = hudState.isPlayerUltActive,
-                ultActiveHalfSecs = hudState.playerUltActiveHalfSecs,
-                ultCooldownHalfSecs = hudState.playerUltCooldownHalfSecs,
-                ultMaxDurationSec = hudState.playerUltMaxDurationSec,
-                ultMaxCooldownSec = hudState.playerUltMaxCooldownSec,
-                palette = palette,
-                alignRight = false,
-                testTagPrefix = "player",
-                modifier = Modifier.weight(1f)
-            )
-
-            Surface(
-                color = palette.elevatedSurface,
-                shape = RoundedCornerShape(8.dp),
-                border = BorderStroke(1.dp, palette.border)
+            IconButton(
+                onClick = onSurrender,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .testTag("surrender_button")
             ) {
-                Text(
-                    text = "VS",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = palette.textSecondary,
-                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
+                Icon(
+                    Icons.Default.Close,
+                    contentDescription = "Leave Fight",
+                    tint = palette.textSecondary,
+                    modifier = Modifier.size(19.dp)
                 )
             }
+        }
 
-            FighterHudColumn(
-                name = opponentName,
-                hp = hudState.opponentHp,
-                maxHp = hudState.opponentMaxHp,
-                hpColor = palette.primaryAccent,
-                ultPercent = hudState.opponentUltPercent,
-                isUltActive = hudState.isOpponentUltActive,
-                ultActiveHalfSecs = hudState.opponentUltActiveHalfSecs,
-                ultCooldownHalfSecs = hudState.opponentUltCooldownHalfSecs,
-                ultMaxDurationSec = hudState.opponentUltMaxDurationSec,
-                ultMaxCooldownSec = hudState.opponentUltMaxCooldownSec,
-                palette = palette,
-                alignRight = true,
-                testTagPrefix = "opponent",
-                modifier = Modifier.weight(1f)
-            )
+        Surface(
+            color = palette.cardSurface,
+            shape = RoundedCornerShape(14.dp),
+            border = BorderStroke(1.dp, palette.border),
+            modifier = Modifier.weight(1f)
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = if (isCompactWidth) 7.dp else 10.dp, vertical = 5.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                FighterHudColumn(
+                    name = playerName,
+                    hp = hudState.playerHp,
+                    maxHp = hudState.playerMaxHp,
+                    hpColor = palette.greenAccent,
+                    ultPercent = hudState.playerUltPercent,
+                    isUltActive = hudState.isPlayerUltActive,
+                    ultActiveHalfSecs = hudState.playerUltActiveHalfSecs,
+                    ultCooldownHalfSecs = hudState.playerUltCooldownHalfSecs,
+                    ultMaxDurationSec = hudState.playerUltMaxDurationSec,
+                    ultMaxCooldownSec = hudState.playerUltMaxCooldownSec,
+                    palette = palette,
+                    alignRight = false,
+                    testTagPrefix = "player",
+                    modifier = Modifier.weight(1f)
+                )
+
+                Surface(
+                    color = palette.elevatedSurface,
+                    shape = RoundedCornerShape(7.dp),
+                    border = BorderStroke(1.dp, palette.border)
+                ) {
+                    Text(
+                        text = "VS",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = palette.textSecondary,
+                        modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                    )
+                }
+
+                FighterHudColumn(
+                    name = opponentName,
+                    hp = hudState.opponentHp,
+                    maxHp = hudState.opponentMaxHp,
+                    hpColor = palette.primaryAccent,
+                    ultPercent = hudState.opponentUltPercent,
+                    isUltActive = hudState.isOpponentUltActive,
+                    ultActiveHalfSecs = hudState.opponentUltActiveHalfSecs,
+                    ultCooldownHalfSecs = hudState.opponentUltCooldownHalfSecs,
+                    ultMaxDurationSec = hudState.opponentUltMaxDurationSec,
+                    ultMaxCooldownSec = hudState.opponentUltMaxCooldownSec,
+                    palette = palette,
+                    alignRight = true,
+                    testTagPrefix = "opponent",
+                    modifier = Modifier.weight(1f)
+                )
+            }
+        }
+
+        // Settings button (48dp touch target)
+        Surface(
+            color = palette.cardSurface,
+            shape = RoundedCornerShape(12.dp),
+            border = BorderStroke(1.dp, palette.border),
+            modifier = Modifier.size(48.dp)
+        ) {
+            IconButton(
+                onClick = onOpenSettings,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .testTag("arena_settings_button")
+            ) {
+                Icon(
+                    Icons.Outlined.Tune,
+                    contentDescription = "Settings",
+                    tint = palette.textSecondary,
+                    modifier = Modifier.size(19.dp)
+                )
+            }
         }
     }
 }
@@ -321,14 +474,14 @@ private fun FighterHudColumn(
 
     val ultStatusLabel = when {
         isUltActive -> "ON ${ultActiveHalfSecs / 2f}s"
-        isOnCooldown -> "WAIT ${ultCooldownHalfSecs / 2f}s"
-        isReady -> "READY!"
+        isOnCooldown -> "${ultCooldownHalfSecs / 2f}s"
+        isReady -> "READY"
         else -> "$ultPercent%"
     }
 
     val hpRatio = (hp.toFloat() / maxHp.coerceAtLeast(1)).coerceIn(0f, 1f)
 
-    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(3.dp)) {
+    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(2.dp)) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -343,7 +496,7 @@ private fun FighterHudColumn(
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f, fill = false)
                 )
-                Spacer(modifier = Modifier.width(4.dp))
+                Spacer(modifier = Modifier.width(3.dp))
                 Text(
                     text = "$hp",
                     style = MaterialTheme.typography.labelMedium,
@@ -355,7 +508,7 @@ private fun FighterHudColumn(
                     style = MaterialTheme.typography.labelMedium,
                     color = hpColor
                 )
-                Spacer(modifier = Modifier.width(4.dp))
+                Spacer(modifier = Modifier.width(3.dp))
                 Text(
                     text = name,
                     style = MaterialTheme.typography.labelLarge,
@@ -631,6 +784,13 @@ private fun ArenaCourtCanvas(
                 style = Stroke(width = 2f)
             )
 
+            CombatVfxRenderer.drawProjectiles(
+                scope = this,
+                projectiles = simulation.projectiles,
+                globalTime = simulation.globalTime,
+                renderMode = engineSettings.renderMode
+            )
+
             CombatVfxRenderer.drawVfx(
                 scope = this,
                 particles = simulation.particles,
@@ -650,21 +810,31 @@ private fun ArenaCourtCanvas(
 private fun ArenaCompactBottomBar(
     ultimateName: String,
     hudState: BattleHudState,
-    turnState: TurnState,
     sfxEnabled: Boolean,
+    musicEnabled: Boolean,
+    isCompactWidth: Boolean,
     palette: AppPalette,
-    onSurrender: () -> Unit,
     onToggleSfx: () -> Unit,
-    onOpenSettings: () -> Unit,
+    onToggleMusic: () -> Unit,
     onTriggerUltimate: () -> Unit
 ) {
-    val isPlayerOnCd = hudState.playerUltCooldownHalfSecs > 0
-    val ultReady = hudState.playerUltPercent >= 100 && !hudState.isPlayerUltActive && !isPlayerOnCd
+    val isPlayerUltOnCd = hudState.playerUltCooldownHalfSecs > 0
+    val ultReady = hudState.playerUltPercent >= 100 && !hudState.isPlayerUltActive && !isPlayerUltOnCd
 
-    val bottomProgress = when {
+    val ultProgress = when {
         hudState.isPlayerUltActive -> ((hudState.playerUltActiveHalfSecs / 2f) / hudState.playerUltMaxDurationSec.coerceAtLeast(1f)).coerceIn(0f, 1f)
-        isPlayerOnCd -> ((hudState.playerUltCooldownHalfSecs / 2f) / hudState.playerUltMaxCooldownSec.coerceAtLeast(1f)).coerceIn(0f, 1f)
+        isPlayerUltOnCd -> ((hudState.playerUltCooldownHalfSecs / 2f) / hudState.playerUltMaxCooldownSec.coerceAtLeast(1f)).coerceIn(0f, 1f)
         else -> (hudState.playerUltPercent / 100f).coerceIn(0f, 1f)
+    }
+
+    val isCounterOnCd = hudState.playerCounterCooldownHalfSecs > 0
+    val isAutoTriggered = hudState.isAutoCounterShielded || hudState.isPlayerCounterActive
+    val counterReady = !isAutoTriggered && !isCounterOnCd
+    val counterProgress = when {
+        isAutoTriggered -> 1f
+        isCounterOnCd ->
+            1f - ((hudState.playerCounterCooldownHalfSecs / 2f) / hudState.playerCounterMaxCooldownSec.coerceAtLeast(1f)).coerceIn(0f, 1f)
+        else -> 1f
     }
 
     Row(
@@ -672,28 +842,6 @@ private fun ArenaCompactBottomBar(
         horizontalArrangement = Arrangement.spacedBy(6.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Exit button (48dp touch target)
-        Surface(
-            color = palette.cardSurface,
-            shape = RoundedCornerShape(12.dp),
-            border = BorderStroke(1.dp, palette.border),
-            modifier = Modifier.size(48.dp)
-        ) {
-            IconButton(
-                onClick = onSurrender,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .testTag("surrender_button")
-            ) {
-                Icon(
-                    Icons.Default.Close,
-                    contentDescription = "Exit Match",
-                    tint = palette.textSecondary,
-                    modifier = Modifier.size(19.dp)
-                )
-            }
-        }
-
         // Sound toggle (48dp touch target)
         Surface(
             color = palette.cardSurface,
@@ -716,58 +864,102 @@ private fun ArenaCompactBottomBar(
             }
         }
 
-        // Settings button (48dp touch target)
-        Surface(
-            color = palette.cardSurface,
-            shape = RoundedCornerShape(12.dp),
-            border = BorderStroke(1.dp, palette.border),
-            modifier = Modifier.size(48.dp)
-        ) {
-            IconButton(
-                onClick = onOpenSettings,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .testTag("arena_settings_button")
+        // Music toggle (48dp touch target — shown directly on >=385dp screens, and always in Settings)
+        if (!isCompactWidth) {
+            Surface(
+                color = palette.cardSurface,
+                shape = RoundedCornerShape(12.dp),
+                border = BorderStroke(1.dp, palette.border),
+                modifier = Modifier.size(48.dp)
             ) {
-                Icon(
-                    Icons.Outlined.Tune,
-                    contentDescription = "Settings",
-                    tint = palette.textSecondary,
-                    modifier = Modifier.size(19.dp)
-                )
+                IconButton(
+                    onClick = onToggleMusic,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .testTag("arena_music_toggle_button")
+                ) {
+                    Icon(
+                        imageVector = if (musicEnabled) Icons.Default.MusicNote else Icons.Default.MusicOff,
+                        contentDescription = if (musicEnabled) "Mute Fight Music" else "Play Fight Music",
+                        tint = if (musicEnabled) palette.goldAccent else palette.textMuted,
+                        modifier = Modifier.size(19.dp)
+                    )
+                }
             }
         }
 
-        // Compact Dash indicator pill
+        // Automatic Chance-Based Counter Status Badge (48dp height, no manual mashing needed)
         Surface(
-            color = palette.cardSurface,
             shape = RoundedCornerShape(12.dp),
+            color = when {
+                isAutoTriggered -> palette.greenAccentSoft
+                counterReady -> palette.blueAccentSoft
+                else -> palette.cardSurface
+            },
             border = BorderStroke(
                 1.dp,
-                if (hudState.redirectReady && turnState == TurnState.NONSTOP_CLASH) palette.blueAccent else palette.border
+                when {
+                    isAutoTriggered -> palette.greenAccent
+                    counterReady -> palette.blueAccent
+                    else -> palette.border
+                }
             ),
-            modifier = Modifier.height(48.dp)
+            modifier = Modifier
+                .weight(0.95f)
+                .height(48.dp)
+                .testTag("auto_counter_status_card")
         ) {
-            Row(
-                modifier = Modifier.padding(horizontal = 10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(5.dp)
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 8.dp, vertical = 6.dp),
+                verticalArrangement = Arrangement.SpaceBetween
             ) {
-                Box(
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(
+                        Icons.Default.Shield,
+                        contentDescription = "Auto Counter Status",
+                        tint = when {
+                            isAutoTriggered -> palette.greenAccent
+                            counterReady -> palette.blueAccent
+                            else -> palette.textMuted
+                        },
+                        modifier = Modifier.size(14.dp)
+                    )
+                    Spacer(modifier = Modifier.width(3.dp))
+                    Text(
+                        text = when {
+                            isAutoTriggered -> "AUTO COUNTER!"
+                            isCounterOnCd -> "Ready in ${hudState.playerCounterCooldownHalfSecs / 2f}s"
+                            else -> "Auto ${hudState.counterLabel} ${hudState.autoCounterPercent}%"
+                        },
+                        style = MaterialTheme.typography.labelMedium,
+                        color = when {
+                            isAutoTriggered -> palette.greenAccent
+                            counterReady -> palette.blueAccent
+                            else -> palette.textSecondary
+                        },
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+
+                LinearProgressIndicator(
+                    progress = { counterProgress },
                     modifier = Modifier
-                        .size(8.dp)
-                        .clip(CircleShape)
-                        .background(if (hudState.redirectReady) palette.blueAccent else palette.textMuted)
-                )
-                Text(
-                    text = when {
-                        turnState == TurnState.AIM_OPENING -> "Aim"
-                        hudState.redirectReady -> "Dash"
-                        else -> "${hudState.redirectHalfSecsLeft / 2f}s"
+                        .fillMaxWidth()
+                        .height(4.dp)
+                        .clip(RoundedCornerShape(50)),
+                    color = when {
+                        isAutoTriggered -> palette.greenAccent
+                        counterReady -> palette.blueAccent
+                        else -> palette.textMuted
                     },
-                    style = MaterialTheme.typography.labelMedium,
-                    color = palette.textPrimary,
-                    maxLines = 1
+                    trackColor = palette.elevatedSurface
                 )
             }
         }
@@ -791,14 +983,14 @@ private fun ArenaCompactBottomBar(
                 }
             ),
             modifier = Modifier
-                .weight(1f)
+                .weight(1.1f)
                 .height(48.dp)
                 .testTag("ultimate_awaken_button")
         ) {
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                    .padding(horizontal = 8.dp, vertical = 6.dp),
                 verticalArrangement = Arrangement.SpaceBetween
             ) {
                 Row(
@@ -812,16 +1004,16 @@ private fun ArenaCompactBottomBar(
                         tint = when {
                             ultReady -> Color.White
                             hudState.isPlayerUltActive -> palette.goldAccent
-                            isPlayerOnCd -> palette.textMuted
+                            isPlayerUltOnCd -> palette.textMuted
                             else -> palette.goldAccent
                         },
-                        modifier = Modifier.size(15.dp)
+                        modifier = Modifier.size(14.dp)
                     )
                     Spacer(modifier = Modifier.width(3.dp))
                     Text(
                         text = when {
                             hudState.isPlayerUltActive -> "ULT ${hudState.playerUltActiveHalfSecs / 2f}s"
-                            isPlayerOnCd -> "WAIT ${hudState.playerUltCooldownHalfSecs / 2f}s"
+                            isPlayerUltOnCd -> "Wait ${hudState.playerUltCooldownHalfSecs / 2f}s"
                             ultReady -> "ULT: $ultimateName"
                             else -> "Ult ${hudState.playerUltPercent}%"
                         },
@@ -829,7 +1021,7 @@ private fun ArenaCompactBottomBar(
                         color = when {
                             ultReady -> Color.White
                             hudState.isPlayerUltActive -> palette.goldAccent
-                            isPlayerOnCd -> palette.textSecondary
+                            isPlayerUltOnCd -> palette.textSecondary
                             else -> palette.textPrimary
                         },
                         maxLines = 1,
@@ -838,7 +1030,7 @@ private fun ArenaCompactBottomBar(
                 }
 
                 LinearProgressIndicator(
-                    progress = { bottomProgress },
+                    progress = { ultProgress },
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(4.dp)
@@ -846,7 +1038,7 @@ private fun ArenaCompactBottomBar(
                     color = when {
                         ultReady -> Color.White
                         hudState.isPlayerUltActive -> palette.goldAccent
-                        isPlayerOnCd -> palette.textMuted
+                        isPlayerUltOnCd -> palette.textMuted
                         else -> palette.blueAccent
                     },
                     trackColor = if (ultReady) Color.White.copy(alpha = 0.28f) else palette.elevatedSurface

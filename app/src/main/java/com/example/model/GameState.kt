@@ -15,10 +15,10 @@ enum class AppScreen {
 }
 
 enum class GameMode(val title: String, val tagLabel: String, val subtitle: String) {
-    PRACTICE_BOT("Practice", "VS Bot", "Fight nonstop bounce battles against Easy, Normal (Hard), or Hard (Extreme) bots."),
-    CUSTOM_MATCH("Custom", "Pick Rival", "Pick both your fighter and any of the 224 anime rivals to duel."),
-    MULTIPLAYER("VS Friend", "LAN & Room", "Battle friends over local Wi-Fi (LAN) or anywhere online using a Room Code."),
-    ONLINE_MATCH("Ranked", "Online", "Play online 1v1 ranked clashes to earn Rank Points and climb the global ladder.")
+    PRACTICE_BOT("Practice", "VS Bot", "Fight a computer bot on Easy, Hard, or Extreme."),
+    CUSTOM_MATCH("Custom", "Pick Both", "Pick your fighter and choose who you want to fight."),
+    MULTIPLAYER("VS Friend", "Wi-Fi & Code", "Fight friends on Wi-Fi or anywhere with a Room Code."),
+    ONLINE_MATCH("Ranked", "Online", "Play real online fights to win Rank Points.")
 }
 
 enum class BotDifficulty(
@@ -28,7 +28,7 @@ enum class BotDifficulty(
     val speedFactor: Float,
     val redirectCooldownSec: Float
 ) {
-    EASY("Easy", "Easy", 0.74f, 0.92f, 4.80f),
+    EASY("Easy", "Easy", 0.42f, 0.72f, 6.80f),
     MEDIUM("Normal", "Hard", 0.95f, 1.15f, 2.45f),
     HARD("Hard", "Extreme", 0.995f, 1.30f, 1.68f)
 }
@@ -79,7 +79,8 @@ data class QuestItem(
     val targetProgress: Int,
     val rewardGold: Int,
     val rewardGems: Int,
-    val isClaimed: Boolean = false
+    val isClaimed: Boolean = false,
+    val isDaily: Boolean = false
 )
 
 data class LeaderboardEntry(
@@ -198,10 +199,70 @@ object InitialGameData {
             .mapIndexed { idx, entry -> entry.copy(rank = idx + 1) }
     }
 
+    fun buildDailyQuests(epochDay: Long): List<QuestItem> {
+        val variant = (epochDay % 3L).toInt()
+        val matchTarget = when (variant) {
+            0 -> 2
+            1 -> 3
+            else -> 2
+        }
+        val counterTarget = when (variant) {
+            0 -> 3
+            1 -> 4
+            else -> 2
+        }
+        return listOf(
+            QuestItem(
+                id = "dq_play_$epochDay",
+                title = "Daily Warmup",
+                description = "Play $matchTarget fights today.",
+                currentProgress = 0,
+                targetProgress = matchTarget,
+                rewardGold = 1_800,
+                rewardGems = 8,
+                isClaimed = false,
+                isDaily = true
+            ),
+            QuestItem(
+                id = "dq_win_$epochDay",
+                title = "Daily Winner",
+                description = "Win 1 fight today in any mode.",
+                currentProgress = 0,
+                targetProgress = 1,
+                rewardGold = 2_600,
+                rewardGems = 12,
+                isClaimed = false,
+                isDaily = true
+            ),
+            QuestItem(
+                id = "dq_counter_$epochDay",
+                title = "Auto Reflex",
+                description = "Trigger Auto-Counter $counterTarget times today.",
+                currentProgress = 0,
+                targetProgress = counterTarget,
+                rewardGold = 2_200,
+                rewardGems = 10,
+                isClaimed = false,
+                isDaily = true
+            ),
+            QuestItem(
+                id = "dq_ult_$epochDay",
+                title = "Big Finish",
+                description = "Use your Ultimate move 2 times today.",
+                currentProgress = 0,
+                targetProgress = 2,
+                rewardGold = 2_400,
+                rewardGems = 10,
+                isClaimed = false,
+                isDaily = true
+            )
+        )
+    }
+
     val combatTips = listOf(
-        "Balls bounce nonstop until one fighter hits 0 HP.",
-        "Every fighter has a special skill and a strong Ultimate attack.",
-        "Use Gold in the Shop to upgrade Health, Power, and Faster Ult.",
-        "Drag on the arena when Dash is ready to change direction."
+        "Tap Counter to block hits or ignore enemy powers!",
+        "In Ultimate form, you can Dash many times fast!",
+        "Check Daily Quests every day for free Gold and Gems.",
+        "Use Gold in the Shop to boost Health, Power, and Faster Ult."
     )
 }

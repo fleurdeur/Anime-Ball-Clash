@@ -9,6 +9,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -63,6 +64,7 @@ import com.example.model.CharacterAlignment
 import com.example.model.CharacterData
 import com.example.model.CharacterRoster
 import com.example.model.ElementTag
+import com.example.model.LorePowerBalancer
 import com.example.model.PlayerProfile
 import com.example.ui.components.AnimeBallRenderer
 import com.example.ui.theme.AppTheme
@@ -101,6 +103,9 @@ fun CustomMatchScreen(
 
     val playerChar = remember(profile.selectedCharacterId) {
         CharacterRoster.getById(profile.selectedCharacterId)
+    }
+    val matchup = remember(playerChar.id, selectedOpponent.id) {
+        LorePowerBalancer.computeMatchup(playerChar, selectedOpponent)
     }
 
     val filteredCharacters by remember(activeTab, unlockedIds, searchQuery, roleFilter, elementFilter) {
@@ -162,7 +167,7 @@ fun CustomMatchScreen(
                             color = palette.textPrimary
                         )
                         Text(
-                            text = "Pick your fighter & exact rival",
+                            text = "Pick any 2 fighters",
                             style = MaterialTheme.typography.labelSmall,
                             color = palette.textSecondary
                         )
@@ -262,18 +267,20 @@ fun CustomMatchScreen(
             }
         }
     ) { innerPadding ->
-        Box(
+        BoxWithConstraints(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
                 .testTag("custom_match_screen"),
             contentAlignment = Alignment.TopCenter
         ) {
+            val compactWidth = maxWidth < 360.dp
+
             Column(
                 modifier = Modifier
                     .widthIn(max = 640.dp)
                     .fillMaxSize()
-                    .padding(horizontal = 14.dp),
+                    .padding(horizontal = if (compactWidth) 10.dp else 14.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 // 1. Live VS Matchup Stage
@@ -297,6 +304,7 @@ fun CustomMatchScreen(
                                 character = playerChar,
                                 isEditing = activeTab == CustomSlotTab.PLAYER,
                                 isUltPreview = previewUlt,
+                                compact = compactWidth,
                                 accent = palette.blueAccent,
                                 onClick = { activeTab = CustomSlotTab.PLAYER },
                                 modifier = Modifier
@@ -307,7 +315,7 @@ fun CustomMatchScreen(
                             Surface(
                                 shape = CircleShape,
                                 color = palette.primaryAccent,
-                                modifier = Modifier.size(38.dp)
+                                modifier = Modifier.size(if (compactWidth) 32.dp else 38.dp)
                             ) {
                                 Box(contentAlignment = Alignment.Center) {
                                     Text(
@@ -323,11 +331,28 @@ fun CustomMatchScreen(
                                 character = selectedOpponent,
                                 isEditing = activeTab == CustomSlotTab.RIVAL,
                                 isUltPreview = previewUlt,
+                                compact = compactWidth,
                                 accent = palette.primaryAccent,
                                 onClick = { activeTab = CustomSlotTab.RIVAL },
                                 modifier = Modifier
                                     .weight(1f)
                                     .testTag("pick_rival_tab")
+                            )
+                        }
+
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = palette.elevatedSurface,
+                            border = BorderStroke(1.dp, palette.border),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                text = "Power Balance: ${matchup.simpleMatchupNote}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = palette.textSecondary,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
                             )
                         }
 
@@ -338,7 +363,7 @@ fun CustomMatchScreen(
                             horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
                             Text(
-                                text = "AI Level",
+                                text = "AI Skill",
                                 style = MaterialTheme.typography.labelMedium,
                                 color = palette.textSecondary
                             )
@@ -346,8 +371,8 @@ fun CustomMatchScreen(
                                 val active = selectedDifficulty == diff
                                 val label = when (diff) {
                                     BotDifficulty.EASY -> "Easy"
-                                    BotDifficulty.MEDIUM -> "Normal (Hard)"
-                                    BotDifficulty.HARD -> "Hard (Extreme)"
+                                    BotDifficulty.MEDIUM -> "Normal"
+                                    BotDifficulty.HARD -> "Hard"
                                 }
                                 Surface(
                                     onClick = { onSelectDifficulty(diff) },
@@ -522,11 +547,14 @@ private fun MatchupSlotCard(
     character: CharacterData,
     isEditing: Boolean,
     isUltPreview: Boolean,
+    compact: Boolean,
     accent: Color,
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val palette = AppTheme.palette
+    val ringSize = if (compact) 42.dp else 52.dp
+    val canvasSize = if (compact) 36.dp else 46.dp
     Surface(
         onClick = onClick,
         shape = RoundedCornerShape(14.dp),
@@ -535,19 +563,19 @@ private fun MatchupSlotCard(
         modifier = modifier
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+            modifier = Modifier.padding(horizontal = if (compact) 8.dp else 10.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             Box(
                 modifier = Modifier
-                    .size(52.dp)
+                    .size(ringSize)
                     .clip(CircleShape)
                     .background(palette.stageSurface)
                     .border(1.dp, palette.stageLine, CircleShape),
                 contentAlignment = Alignment.Center
             ) {
-                Canvas(modifier = Modifier.size(46.dp)) {
+                Canvas(modifier = Modifier.size(canvasSize)) {
                     AnimeBallRenderer.drawPreviewAvatar(
                         scope = this,
                         character = character,
@@ -571,10 +599,11 @@ private fun MatchupSlotCard(
                     overflow = TextOverflow.Ellipsis
                 )
                 Text(
-                    text = "${character.maxHp} HP • ${character.baseDamage} DMG",
+                    text = "${character.animeRace.simpleName} • Auto ${character.autoCounterPercent}%",
                     style = MaterialTheme.typography.labelSmall,
                     color = palette.textSecondary,
-                    maxLines = 1
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
         }

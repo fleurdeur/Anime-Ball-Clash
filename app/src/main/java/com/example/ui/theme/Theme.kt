@@ -9,6 +9,8 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Density
 import com.example.model.AppThemeMode
 
 val LocalAppPalette = staticCompositionLocalOf { DarkAppPalette }
@@ -93,8 +95,16 @@ fun AnimeBallClashTheme(
 
     val palette = if (useDark) DarkAppPalette else LightAppPalette
     val colorScheme = if (useDark) DarkM3Scheme else LightM3Scheme
+    val currentDensity = LocalDensity.current
+    val safeDensity = Density(
+        density = currentDensity.density,
+        fontScale = currentDensity.fontScale.coerceIn(0.88f, 1.18f)
+    )
 
-    CompositionLocalProvider(LocalAppPalette provides palette) {
+    CompositionLocalProvider(
+        LocalAppPalette provides palette,
+        LocalDensity provides safeDensity
+    ) {
         MaterialTheme(
             colorScheme = colorScheme,
             typography = Typography,

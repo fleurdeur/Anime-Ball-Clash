@@ -17,19 +17,46 @@ class BattleSimulation(
     val opponentBall: CombatBall,
     var engineSettings: EngineSettings,
     var isRemoteMultiplayer: Boolean = false,
+    var isGuestClient: Boolean = false,
+    randomSeed: Int = 12345,
     val onCollisionImpact: (isPlayerAttacker: Boolean, damage: Int, isCrit: Boolean, passiveLabel: String) -> Unit,
     val onWallBounce: (ball: CombatBall) -> Unit,
     val onKnockout: (isPlayerWinner: Boolean) -> Unit,
     val onUltimateActivated: (isPlayer: Boolean, ultimateName: String) -> Unit = { _, _ -> },
     val onPassiveTriggered: (isPlayer: Boolean, passiveName: String) -> Unit = { _, _ -> },
-    val onRedirectUsed: (isPlayer: Boolean) -> Unit = {}
+    val onRedirectUsed: (isPlayer: Boolean) -> Unit = {},
+    val onCounterActivated: (isPlayer: Boolean, counterName: String) -> Unit = { _, _ -> }
 ) {
+    private var rng: Random = Random(randomSeed)
+
+    fun reseed(seed: Int) {
+        rng = Random(seed)
+    }
+
     val particles = ArrayList<Particle>(72)
     val shockwaves = ArrayList<ShockwaveRing>(14)
     val floatingTexts = ArrayList<FloatingCombatText>(14)
     val fireHazards = ArrayList<FireHazardZone>(10)
+    val projectiles = ArrayList<AbilityProjectile>(24)
 
     private var nextEntityId = 1L
+
+    init {
+        playerBall.matchupBalance = LorePowerBalancer.computeMatchup(playerBall.character, opponentBall.character)
+        opponentBall.matchupBalance = LorePowerBalancer.computeMatchup(opponentBall.character, playerBall.character)
+        applyLoreMatchupHp(playerBall)
+        applyLoreMatchupHp(opponentBall)
+    }
+
+    private fun applyLoreMatchupHp(ball: CombatBall) {
+        val mult = ball.matchupBalance.hpMultiplier
+        if (abs(mult - 1.0f) < 0.005f) return
+        val wasFullHp = ball.currentHp >= ball.maxHp - 0.5f
+        val hpRatio = (ball.currentHp / ball.maxHp.coerceAtLeast(1f)).coerceIn(0f, 1f)
+        ball.maxHp = (ball.maxHp * mult).coerceAtLeast(180f)
+        ball.currentHp = if (wasFullHp) ball.maxHp else (ball.maxHp * hpRatio).coerceAtLeast(1f)
+        ball.delayedHp = ball.currentHp
+    }
 
     var globalTime: Float = 0f
     var isRoundActive: Boolean = true
@@ -37,6 +64,7 @@ class BattleSimulation(
     var isArenaInitialized: Boolean = false
     var screenShakeAmount: Float = 0f
     var slowMoScale: Float = 1.0f
+    var activeBotDifficulty: BotDifficulty = BotDifficulty.MEDIUM
 
     // Tactical mid-flight redirect cooldowns (seconds)
     var playerRedirectCooldown: Float = 0f
@@ -123,6 +151,7 @@ class BattleSimulation(
      * until remote peer sends their exact opening/dash vectors.
      */
     fun startNonstopClash(playerDirection: Vector2, difficulty: BotDifficulty) {
+        activeBotDifficulty = difficulty
         val pDir = sanitizeLaunchAngle(
             if (playerDirection.length() > 0.01f) playerDirection.normalized()
             else Vector2(0.42f, -0.91f).normalized()
@@ -134,7 +163,7 @@ class BattleSimulation(
         }
 
         isClashStarted = true
-        playerRedirectCooldown = 1.1f
+        playerRedirectCooldown = 1.0f
         aiRedirectCooldown = (difficulty.redirectCooldownSec - opponentBall.upgrades.redirectCooldownReduction())
             .coerceAtLeast(1.15f) * 0.68f
 
@@ -186,7 +215,8 @@ class BattleSimulation(
         localHp: Float,
         remoteHp: Float,
         localUlt: Float,
-        remoteUlt: Float
+        remoteUlt: Float,
+        snapBlend: Float = 0.45f
     ) {
         if (!isArenaInitialized || !isRoundActive) return
         val targetLocalPos = Vector2(
@@ -198,8 +228,9 @@ class BattleSimulation(
             (remoteNormY * arenaHeight).coerceIn(wallTop, wallBottom)
         )
         val speedRef = baseArenaSpeed.coerceAtLeast(200f)
-        playerBall.position = playerBall.position + (targetLocalPos - playerBall.position) * 0.42f
-        opponentBall.position = opponentBall.position + (targetRemotePos - opponentBall.position) * 0.48f
+        val blend = snapBlend.coerceIn(0.25f, 0.90f)
+        playerBall.position = playerBall.position + (targetLocalPos - playerBall.position) * blend
+        opponentBall.position = opponentBall.position + (targetRemotePos - opponentBall.position) * (blend + 0.06f).coerceAtMost(0.95f)
         if (!playerBall.isStunned) {
             playerBall.velocity = Vector2(localNormVx * speedRef, localNormVy * speedRef)
         }
@@ -218,6 +249,86 @@ class BattleSimulation(
             isClashStarted = true
         }
         checkKnockoutState()
+    }
+
+    /**
+     * Packs Host's authoritative normalized arena state into a compact string for Firestore online sync.
+     */
+    fun packHostSyncState(): String {
+        val w = arenaWidth.coerceAtLeast(1f)
+        val h = arenaHeight.coerceAtLeast(1f)
+        val spd = baseArenaSpeed.coerceAtLeast(200f)
+        fun f(v: Float): String = ((v * 1000f).toInt() / 1000f).toString()
+        return buildString(96) {
+            append(f(playerBall.position.x / w)).append(',')
+            append(f(playerBall.position.y / h)).append(',')
+            append(f(playerBall.velocity.x / spd)).append(',')
+            append(f(playerBall.velocity.y / spd)).append(',')
+            append(f(opponentBall.position.x / w)).append(',')
+            append(f(opponentBall.position.y / h)).append(',')
+            append(f(opponentBall.velocity.x / spd)).append(',')
+            append(f(opponentBall.velocity.y / spd)).append(',')
+            append(playerBall.currentHp.toInt()).append(',')
+            append(opponentBall.currentHp.toInt()).append(',')
+            append(playerBall.ultimateGauge.toInt()).append(',')
+            append(opponentBall.ultimateGauge.toInt())
+        }
+    }
+
+    /**
+     * Applies Host's authoritative packed state onto Guest, mirroring Y so Guest stays at bottom of screen.
+     */
+    fun applyPackedHostSyncOnGuest(packed: String) {
+        if (packed.isBlank()) return
+        val parts = packed.split(',')
+        if (parts.size < 12) return
+        val hostX = parts[0].toFloatOrNull() ?: return
+        val hostY = parts[1].toFloatOrNull() ?: return
+        val hostVx = parts[2].toFloatOrNull() ?: return
+        val hostVy = parts[3].toFloatOrNull() ?: return
+        val guestX = parts[4].toFloatOrNull() ?: return
+        val guestY = parts[5].toFloatOrNull() ?: return
+        val guestVx = parts[6].toFloatOrNull() ?: return
+        val guestVy = parts[7].toFloatOrNull() ?: return
+        val hostHp = parts[8].toFloatOrNull() ?: return
+        val guestHp = parts[9].toFloatOrNull() ?: return
+        val hostUlt = parts[10].toFloatOrNull() ?: return
+        val guestUlt = parts[11].toFloatOrNull() ?: return
+
+        applyMirroredLanSync(
+            localNormX = guestX,
+            localNormY = 1f - guestY,
+            localNormVx = guestVx,
+            localNormVy = -guestVy,
+            remoteNormX = hostX,
+            remoteNormY = 1f - hostY,
+            remoteNormVx = hostVx,
+            remoteNormVy = -hostVy,
+            localHp = guestHp,
+            remoteHp = hostHp,
+            localUlt = guestUlt,
+            remoteUlt = hostUlt,
+            snapBlend = 0.68f
+        )
+    }
+
+    /**
+     * Forces identical authoritative match outcome on Guest when Host finishes the match.
+     */
+    fun forceAuthoritativeFinish(isPlayerWinner: Boolean, finalPlayerHp: Float, finalOpponentHp: Float) {
+        if (!isRoundActive) return
+        playerBall.currentHp = if (isPlayerWinner) max(1f, finalPlayerHp) else 0f
+        opponentBall.currentHp = if (isPlayerWinner) 0f else max(1f, finalOpponentHp)
+        playerBall.delayedHp = playerBall.currentHp
+        opponentBall.delayedHp = opponentBall.currentHp
+        isRoundActive = false
+        slowMoScale = 0.25f
+        screenShakeAmount = 26f
+        val defeated = if (isPlayerWinner) opponentBall else playerBall
+        val koColor = if (isPlayerWinner) Color(0xFFFACC15) else Color(0xFFE5392D)
+        spawnShockwave(defeated.position.x, defeated.position.y, koColor, defeated.radius * 4.5f)
+        spawnImpactBurst(defeated.position.x, defeated.position.y, koColor, 24)
+        onKnockout(isPlayerWinner)
     }
 
     fun launchPlayer(direction: Vector2, powerRatio: Float = 1.0f) {
@@ -242,33 +353,220 @@ class BattleSimulation(
         if (dir.length() < 0.01f) return false
 
         playerRedirectCooldown = playerBall.effectiveRedirectCooldownSec
-        playerBall.speedBoostMultiplier = 1.26f
-        playerBall.speedBoostTimer = 0.65f
+        playerBall.speedBoostMultiplier = if (playerBall.isUltimateActive) 1.36f else 1.26f
+        playerBall.speedBoostTimer = if (playerBall.isUltimateActive) 0.72f else 0.65f
         applyImpulseLaunch(playerBall, dir, 1.0f)
         spawnFloatingText(
-            "DASH!",
+            if (playerBall.isUltimateActive) "MULTI-DASH!" else "DASH!",
             playerBall.position.x,
             playerBall.position.y - playerBall.radius * 1.15f,
-            Color(0xFF38BDF8)
+            if (playerBall.isUltimateActive) Color(0xFFFACC15) else Color(0xFF38BDF8),
+            isCrit = playerBall.isUltimateActive
         )
         onRedirectUsed(true)
         return true
     }
 
     /**
+     * Teleports `teleporter` directly behind `target` relative to `target`'s movement/facing,
+     * spawning departure and arrival anime warp VFX and aiming a back-strike into `target`!
+     */
+    private fun teleportBehindTarget(
+        teleporter: CombatBall,
+        target: CombatBall,
+        targetFacingOverride: Vector2? = null
+    ) {
+        val oldPos = teleporter.position
+        spawnShockwave(oldPos.x, oldPos.y, teleporter.character.auraColor, teleporter.radius * 2.3f, AbilityVfxStyle.LIGHTNING_NOVA, 0.34f)
+        spawnImpactBurst(oldPos.x, oldPos.y, teleporter.character.auraColor, max(4, engineSettings.renderMode.particleCountOnHit / 2))
+
+        val targetFacing = when {
+            targetFacingOverride != null && targetFacingOverride.length() > 20f -> targetFacingOverride.normalized()
+            target.velocity.length() > 20f -> target.velocity.normalized()
+            (oldPos - target.position).length() > 1f -> (oldPos - target.position).normalized()
+            else -> Vector2(0f, 1f)
+        }
+        val safeSep = target.radius + teleporter.radius + 14f
+        var behindPos = target.position - (targetFacing * safeSep)
+        behindPos = Vector2(
+            behindPos.x.coerceIn(wallLeft + 4f, wallRight - 4f),
+            behindPos.y.coerceIn(wallTop + 4f, wallBottom - 4f)
+        )
+        // If target had its back pinned right against a wall, warp to the opposite open side
+        if ((behindPos - target.position).length() < (target.radius + teleporter.radius) * 0.85f) {
+            val altPos = target.position + (targetFacing * safeSep)
+            behindPos = Vector2(
+                altPos.x.coerceIn(wallLeft + 4f, wallRight - 4f),
+                altPos.y.coerceIn(wallTop + 4f, wallBottom - 4f)
+            )
+        }
+
+        teleporter.position = behindPos
+        val strikeDir = sanitizeLaunchAngle(
+            if ((target.position - behindPos).length() > 1f) {
+                (target.position - behindPos).normalized()
+            } else {
+                targetFacing
+            }
+        )
+        teleporter.resumeDirection = strikeDir
+        teleporter.speedBoostMultiplier = 1.36f
+        teleporter.speedBoostTimer = 0.85f
+        teleporter.velocity = strikeDir * computeTargetCruiseSpeed(teleporter)
+        teleporter.weaponSpinBurst = 24f
+
+        spawnShockwave(behindPos.x, behindPos.y, Color(0xFFFACC15), teleporter.radius * 2.6f, AbilityVfxStyle.LIGHTNING_NOVA, 0.38f)
+        spawnImpactBurst(behindPos.x, behindPos.y, Color(0xFFFACC15), max(4, engineSettings.renderMode.particleCountOnHit / 2))
+    }
+
+    /**
+     * Automatic chance-based counter roll!
+     * Evaluates when `defender` is about to take collision, projectile, or Ultimate impact.
+     */
+    private fun tryAutoCounter(
+        defender: CombatBall,
+        attacker: CombatBall,
+        incomingDamage: Float,
+        isPlayerDefender: Boolean,
+        attackerFacingOverride: Vector2? = null
+    ): Boolean {
+        if (!isRoundActive || defender.isDead) return false
+        if (defender.isCounterActive) {
+            resolveCounterPayoff(
+                counterBall = defender,
+                attackerBall = attacker,
+                blockedDamage = incomingDamage,
+                isPlayerCountering = isPlayerDefender,
+                attackerFacingOverride = attackerFacingOverride
+            )
+            return true
+        }
+        if (!defender.canActivateCounter) return false
+
+        var chance = defender.effectiveAutoCounterChance
+        if (!isRemoteMultiplayer && activeBotDifficulty == BotDifficulty.EASY) {
+            chance = if (isPlayerDefender) (chance + 0.06f).coerceAtMost(0.52f) else chance * 0.32f
+        }
+        if (rng.nextFloat() >= chance) return false
+
+        onCounterActivated(isPlayerDefender, defender.character.counterArchetype.simpleName)
+        resolveCounterPayoff(
+            counterBall = defender,
+            attackerBall = attacker,
+            blockedDamage = incomingDamage,
+            isPlayerCountering = isPlayerDefender,
+            attackerFacingOverride = attackerFacingOverride
+        )
+        return true
+    }
+
+    /**
+     * Triggers the character's Counter Ability directly (used by tests, remote packets, or instant stun-breaks):
+     * - Teleport characters warp behind the rival and strike!
+     * - Specialized characters trigger Time Immunity, Anti-Magic, Infinity, Stand Counter, Full Reflect, Dodge, or Iron Armor!
+     */
+    fun triggerCounter(ball: CombatBall): Boolean {
+        if (!isRoundActive || !ball.canActivateCounter) return false
+        val isPlayer = ball === playerBall
+        val rival = if (isPlayer) opponentBall else playerBall
+        val counterType = ball.character.counterArchetype
+
+        ball.counterActiveTimer = ball.counterDurationSec
+        ball.passiveFlashTimer = 0.85f
+        ball.weaponSpinBurst = 20f
+
+        when (counterType) {
+            CounterArchetype.TELEPORT_STRIKE -> {
+                ball.stunTimeRemaining = 0f
+                ball.slowTimer = 0f
+                ball.bleedTicksRemaining = 0
+                ball.isShieldActive = true
+                ball.shieldVisualTimer = ball.counterDurationSec
+                teleportBehindTarget(ball, rival)
+            }
+            CounterArchetype.TIME_IMMUNITY -> {
+                if (ball.stunTimeRemaining > 0f) {
+                    ball.stunTimeRemaining = 0f
+                    val resume = sanitizeLaunchAngle(ball.resumeDirection)
+                    ball.velocity = resume * computeTargetCruiseSpeed(ball)
+                }
+                spawnShockwave(ball.position.x, ball.position.y, Color(0xFFFACC15), ball.radius * 2.7f, AbilityVfxStyle.TIME_DIAL, 0.44f)
+            }
+            CounterArchetype.ANTI_MAGIC_NULL -> {
+                ball.stunTimeRemaining = 0f
+                ball.slowTimer = 0f
+                if (rival.isUltimateActive && rival.character.element == ElementTag.MAGIC) {
+                    rival.ultimateTimeRemaining = max(0f, rival.ultimateTimeRemaining - 1.5f)
+                } else {
+                    rival.ultimateGauge = max(0f, rival.ultimateGauge - 14f)
+                }
+                spawnShockwave(ball.position.x, ball.position.y, Color(0xFFEF4444), ball.radius * 2.7f, AbilityVfxStyle.SLASH_CROSS, 0.42f)
+            }
+            CounterArchetype.INFINITY_BARRIER_COUNTER -> {
+                ball.stunTimeRemaining = 0f
+                ball.slowTimer = 0f
+                ball.isShieldActive = true
+                ball.shieldVisualTimer = ball.counterDurationSec
+                spawnShockwave(ball.position.x, ball.position.y, Color(0xFF38BDF8), ball.radius * 2.8f, AbilityVfxStyle.DOMAIN_SIGIL, 0.44f)
+            }
+            CounterArchetype.STAND_RUSH_COUNTER -> {
+                if (ball.stunTimeRemaining > 0f) {
+                    ball.stunTimeRemaining = 0f
+                    ball.velocity = sanitizeLaunchAngle(ball.resumeDirection) * computeTargetCruiseSpeed(ball)
+                }
+                spawnShockwave(ball.position.x, ball.position.y, ball.character.auraColor, ball.radius * 2.8f, AbilityVfxStyle.SHOCKWAVE, 0.42f)
+            }
+            CounterArchetype.SHADOW_DODGE -> {
+                ball.bleedTicksRemaining = 0
+                ball.burnTicksRemaining = 0
+                ball.speedBoostMultiplier = 1.34f
+                ball.speedBoostTimer = 1.0f
+                spawnShockwave(ball.position.x, ball.position.y, Color(0xFFA855F7), ball.radius * 2.4f, AbilityVfxStyle.LIGHTNING_NOVA, 0.38f)
+            }
+            CounterArchetype.TITAN_ARMOR_COUNTER -> {
+                ball.stunTimeRemaining = 0f
+                ball.slowTimer = 0f
+                ball.isShieldActive = true
+                ball.shieldVisualTimer = ball.counterDurationSec
+                spawnShockwave(ball.position.x, ball.position.y, Color(0xFFF59E0B), ball.radius * 2.6f, AbilityVfxStyle.SHOCKWAVE, 0.42f)
+            }
+            CounterArchetype.VECTOR_REFLECT_COUNTER,
+            CounterArchetype.GUARD_PARRY -> {
+                ball.isShieldActive = true
+                ball.shieldVisualTimer = ball.counterDurationSec
+                spawnShockwave(ball.position.x, ball.position.y, Color(0xFF38BDF8), ball.radius * 2.4f, AbilityVfxStyle.SHOCKWAVE, 0.38f)
+            }
+        }
+
+        val prefix = if (isPlayer) "" else "RIVAL "
+        val callout = LorePowerBalancer.resolveCanonCounterCallout(ball.character)
+        spawnFloatingText(
+            "$prefix$callout",
+            ball.position.x,
+            ball.position.y - ball.radius * 1.2f,
+            Color(0xFF38BDF8),
+            isCrit = true
+        )
+        onCounterActivated(isPlayer, counterType.simpleName)
+        return true
+    }
+
+    /**
      * AI tactical step:
-     * - Normal (MEDIUM) plays aggressively like a Hard veteran (fast Ult, predictive bank-shots, rapid dashes).
-     * - Hard (HARD) plays at Extreme Grandmaster level (instant Ult, multi-wall prediction, evasive counter-dash).
-     * Disabled automatically when `isRemoteMultiplayer == true`.
+     * - Easy (EASY): genuinely relaxed and beginner-friendly (slow speed, wide aim spread, slow Ult).
+     * - Normal (MEDIUM): plays aggressively like a Hard veteran (fast Ult, predictive bank-shots).
+     * - Hard (HARD): Extreme Grandmaster level (instant Ult, multi-dash in Ult, smart evasion).
+     * Note: Counters for both Player and AI are now 100% automatic and chance-based when attacked!
      */
     fun performAiTacticalStep(dt: Float, difficulty: BotDifficulty) {
         if (isRemoteMultiplayer || !isClashStarted || !isRoundActive) return
+        activeBotDifficulty = difficulty
 
-        // Symmetric AI Ultimate activation (respects gauge == 100%, not active, not on cooldown, not stunned)
+        // Symmetric AI Ultimate activation
         if (opponentBall.canActivateUltimate && !opponentBall.isStunned) {
             opponentBall.aiUltReactionTimer += dt
             val reactionDelay = when (difficulty) {
-                BotDifficulty.EASY -> 0.80f
+                BotDifficulty.EASY -> 3.40f
                 BotDifficulty.MEDIUM -> 0.18f
                 BotDifficulty.HARD -> 0.06f
             }
@@ -280,38 +578,43 @@ class BattleSimulation(
             opponentBall.aiUltReactionTimer = 0f
         }
 
+        val distToPlayer = (playerBall.position - opponentBall.position).length()
+        val playerDangerous = (playerBall.isSeriousActive || (playerBall.isUltimateActive && !opponentBall.isUltimateActive))
+
         aiRedirectCooldown = max(0f, aiRedirectCooldown - dt)
 
-        // Extreme mode threat-evasion: if player triggers Serious Punch or Ultimate at close range, counter-dash early!
-        val playerDangerous = (playerBall.isSeriousActive || (playerBall.isUltimateActive && !opponentBall.isUltimateActive))
-        val distToPlayer = (playerBall.position - opponentBall.position).length()
         val emergencyEvade = difficulty == BotDifficulty.HARD &&
             playerDangerous &&
             distToPlayer < playerBall.radius * 5.2f &&
             aiRedirectCooldown < 0.45f
 
         if ((aiRedirectCooldown <= 0f || emergencyEvade) && !opponentBall.isStunned) {
-            val minCd = when (difficulty) {
-                BotDifficulty.EASY -> 2.8f
-                BotDifficulty.MEDIUM -> 1.55f
-                BotDifficulty.HARD -> 1.08f
+            val baseCd = if (opponentBall.isUltimateActive && difficulty != BotDifficulty.EASY) {
+                if (difficulty == BotDifficulty.HARD) 0.48f else 0.78f
+            } else {
+                val minCd = when (difficulty) {
+                    BotDifficulty.EASY -> 5.8f
+                    BotDifficulty.MEDIUM -> 1.55f
+                    BotDifficulty.HARD -> 1.08f
+                }
+                (difficulty.redirectCooldownSec - opponentBall.upgrades.redirectCooldownReduction())
+                    .coerceAtLeast(minCd)
             }
-            aiRedirectCooldown = (difficulty.redirectCooldownSec - opponentBall.upgrades.redirectCooldownReduction())
-                .coerceAtLeast(minCd)
+            aiRedirectCooldown = baseCd
 
             val rawDir = if (emergencyEvade) {
                 val away = (opponentBall.position - playerBall.position).normalized()
-                away.rotate(if (Random.nextBoolean()) 0.72f else -0.72f)
+                away.rotate(if (rng.nextBoolean()) 0.72f else -0.72f)
             } else {
                 computeAiInterceptDirection(difficulty)
             }
             val dir = sanitizeLaunchAngle(rawDir)
             opponentBall.speedBoostMultiplier = when (difficulty) {
-                BotDifficulty.EASY -> 1.14f
+                BotDifficulty.EASY -> 0.96f
                 BotDifficulty.MEDIUM -> 1.24f
                 BotDifficulty.HARD -> 1.32f
             }
-            opponentBall.speedBoostTimer = if (difficulty == BotDifficulty.HARD) 0.72f else 0.58f
+            opponentBall.speedBoostTimer = if (difficulty == BotDifficulty.EASY) 0.25f else if (difficulty == BotDifficulty.HARD) 0.72f else 0.58f
             applyImpulseLaunch(opponentBall, dir, difficulty.speedFactor)
             onRedirectUsed(false)
         }
@@ -320,7 +623,7 @@ class BattleSimulation(
     fun computeAiInterceptDirection(difficulty: BotDifficulty): Vector2 {
         val origin = opponentBall.position
         val leadTime = when (difficulty) {
-            BotDifficulty.EASY -> 0.14f
+            BotDifficulty.EASY -> 0.05f
             BotDifficulty.MEDIUM -> 0.25f
             BotDifficulty.HARD -> 0.33f
         }
@@ -331,7 +634,7 @@ class BattleSimulation(
                 (predicted - origin).normalized()
             }
             BotDifficulty.MEDIUM -> {
-                if (Random.nextFloat() < 0.45f) {
+                if (rng.nextFloat() < 0.45f) {
                     val bounceLeft = predicted.x < arenaWidth * 0.5f
                     val mirrorX = if (bounceLeft) (2f * wallLeft - predicted.x) else (2f * wallRight - predicted.x)
                     (Vector2(mirrorX, predicted.y) - origin).normalized()
@@ -340,9 +643,8 @@ class BattleSimulation(
                 }
             }
             BotDifficulty.HARD -> {
-                // Extreme solver: pick deadly bank-shot when opponent has Elastic/Combo synergy or clean angle, else pinpoint intercept
                 val wantsBank = opponentBall.character.passiveArchetype == PassiveArchetype.ELASTIC_MOMENTUM ||
-                    Random.nextFloat() < 0.52f
+                    rng.nextFloat() < 0.52f
                 if (wantsBank) {
                     val distLeft = abs(origin.x - wallLeft) + abs(predicted.x - wallLeft)
                     val distRight = abs(wallRight - origin.x) + abs(wallRight - predicted.x)
@@ -355,8 +657,8 @@ class BattleSimulation(
         }
 
         val fallback = if (rawDir.length() < 0.01f) Vector2(0.45f, 0.89f).normalized() else rawDir
-        val jitterMax = (1f - difficulty.aimAccuracy) * 0.32f
-        val jitter = (Random.nextFloat() * 2f - 1f) * jitterMax
+        val jitterMax = if (difficulty == BotDifficulty.EASY) 0.78f else (1f - difficulty.aimAccuracy) * 0.32f
+        val jitter = (rng.nextFloat() * 2f - 1f) * jitterMax
         return fallback.rotate(jitter).normalized()
     }
 
@@ -393,44 +695,79 @@ class BattleSimulation(
 
     /**
      * Triggers Ultimate Awakening for either Player or AI across all 224 characters
-     * via the 10 deterministic UltimateArchetypes.
+     * AND launches their canon visible projectiles (Hollow Purple, Gate of Babylon swords,
+     * Flying Raijin teleport kunai, Kamehameha/Excalibur beams, Zoltraak magic, World Slash, etc.)
+     * that shoot out toward the opposing character and smoothly fade out!
      */
     fun triggerUltimate(ball: CombatBall): Boolean {
         if (!ball.canActivateUltimate) return false
         ball.ultimateGauge = 0f
         ball.isUltimateActive = true
         ball.ultimateTimeRemaining = ball.character.ultimateDurationSeconds
+        ball.ultVolleyTimer = 1.25f
         ball.kamuiBounceStacks = 0
         ball.weaponSpinBurst = 24f
         ball.weaponScale = ball.targetWeaponScale
         ball.passiveFlashTimer = 0.85f
 
         val isPlayer = ball === playerBall
+        if (isPlayer) {
+            // Immediately unlock Multi-Dash when entering Ultimate form!
+            playerRedirectCooldown = 0f
+        } else if (!isRemoteMultiplayer && activeBotDifficulty != BotDifficulty.EASY) {
+            aiRedirectCooldown = min(aiRedirectCooldown, 0.5f)
+        }
         val rival = if (isPlayer) opponentBall else playerBall
         val prefix = if (isPlayer) "" else "BOT "
         val pwrBonus = ball.upgrades.powerLevel
+
+        // Devil / Hybrid canon trait: heals a bit on Ultimate awakening
+        if (ball.character.animeRace == AnimeRace.DEVIL_HYBRID) {
+            ball.currentHp = min(ball.maxHp, ball.currentHp + 18f)
+        }
+
         var ultWaveStyle = AbilityVfxStyle.SHOCKWAVE
+
+        val rivalTimeImmune = rival.isCounterActive ||
+            (rival.character.counterArchetype == CounterArchetype.TIME_IMMUNITY && rival.isUltimateActive) ||
+            (rival.character.id == "giorno_requiem" && rival.isUltimateActive)
 
         when (ball.character.ultimateArchetype) {
             UltimateArchetype.TIME_STOP -> {
                 ultWaveStyle = AbilityVfxStyle.TIME_DIAL
-                if (rival.velocity.length() > 1f) rival.resumeDirection = rival.velocity.normalized()
-                rival.velocity = Vector2.Zero
-                rival.stunTimeRemaining = 1.65f
-                spawnShockwave(rival.position.x, rival.position.y, Color(0xFFFACC15), rival.radius * 3.2f, AbilityVfxStyle.TIME_DIAL, 0.52f)
-                val callout = if (ball.character.id == "dio_world") "${prefix}TIME STOP!" else "$prefix${ball.character.ultimateName.uppercase()}!"
-                spawnFloatingText(callout, rival.position.x, rival.position.y - rival.radius * 1.25f, Color(0xFFFACC15), isCrit = true)
+                val escapedByAutoCounter = !rivalTimeImmune &&
+                    rival.character.counterArchetype in setOf(
+                        CounterArchetype.TIME_IMMUNITY,
+                        CounterArchetype.TELEPORT_STRIKE,
+                        CounterArchetype.INFINITY_BARRIER_COUNTER
+                    ) &&
+                    tryAutoCounter(rival, ball, 14f, !isPlayer)
+
+                if (rivalTimeImmune) {
+                    spawnShockwave(rival.position.x, rival.position.y, Color(0xFF38BDF8), rival.radius * 3.0f, AbilityVfxStyle.TIME_DIAL, 0.48f)
+                    spawnFloatingText("TIME IMMUNE!", rival.position.x, rival.position.y - rival.radius * 1.25f, Color(0xFF38BDF8), isCrit = true)
+                } else if (!escapedByAutoCounter) {
+                    if (rival.velocity.length() > 1f) rival.resumeDirection = rival.velocity.normalized()
+                    rival.velocity = Vector2.Zero
+                    rival.stunTimeRemaining = 1.55f
+                    spawnShockwave(rival.position.x, rival.position.y, Color(0xFFFACC15), rival.radius * 3.2f, AbilityVfxStyle.TIME_DIAL, 0.52f)
+                    val callout = if (ball.character.id == "dio_world") "${prefix}TIME STOP!" else "$prefix${ball.character.ultimateName.uppercase()}!"
+                    spawnFloatingText(callout, rival.position.x, rival.position.y - rival.radius * 1.25f, Color(0xFFFACC15), isCrit = true)
+                }
             }
 
             UltimateArchetype.DOMAIN_STUN -> {
                 ultWaveStyle = AbilityVfxStyle.DOMAIN_SIGIL
-                if (rival.velocity.length() > 1f) rival.resumeDirection = rival.velocity.normalized()
-                rival.velocity = Vector2.Zero
-                rival.stunTimeRemaining = 1.50f
-                rival.slowTimer = 2.6f
-                spawnFireHazard(ball.id, rival.position.x, rival.position.y, rival.radius * 1.05f, 4.0f, ball.character.auraColor)
-                spawnShockwave(rival.position.x, rival.position.y, ball.character.auraColor, rival.radius * 3.4f, AbilityVfxStyle.DOMAIN_SIGIL, 0.55f)
-                spawnFloatingText("$prefix${ball.character.ultimateName.uppercase()}!", rival.position.x, rival.position.y - rival.radius * 1.25f, Color(0xFF818CF8), isCrit = true)
+                if (!tryAutoCounter(rival, ball, 18f, !isPlayer)) {
+                    if (rival.velocity.length() > 1f) rival.resumeDirection = rival.velocity.normalized()
+                    rival.velocity = Vector2.Zero
+                    rival.stunTimeRemaining = if (ball.character.id == "satoru_void") 1.15f else 1.40f
+                    rival.slowTimer = 2.4f
+                    spawnFireHazard(ball.id, rival.position.x, rival.position.y, rival.radius * 1.05f, 3.8f, ball.character.auraColor)
+                    spawnShockwave(rival.position.x, rival.position.y, ball.character.auraColor, rival.radius * 3.4f, AbilityVfxStyle.DOMAIN_SIGIL, 0.55f)
+                    val label = if (ball.character.id == "satoru_void") "${prefix}HOLLOW PURPLE!" else "$prefix${ball.character.ultimateName.uppercase()}!"
+                    spawnFloatingText(label, ball.position.x, ball.position.y - ball.radius * 1.25f, Color(0xFFA855F7), isCrit = true)
+                }
             }
 
             UltimateArchetype.SERIOUS_ONE_PUNCH -> {
@@ -438,36 +775,18 @@ class BattleSimulation(
                 ball.isSeriousActive = true
                 ball.speedBoostMultiplier = 1.28f
                 ball.speedBoostTimer = 2.5f
-                spawnFloatingText("$prefix${ball.character.ultimateName.uppercase()} READY!", ball.position.x, ball.position.y - ball.radius * 1.25f, Color(0xFFFACC15), isCrit = true)
+                spawnFloatingText("$prefix${ball.character.ultimateName.uppercase()}!", ball.position.x, ball.position.y - ball.radius * 1.25f, Color(0xFFFACC15), isCrit = true)
             }
 
             UltimateArchetype.METEOR_NUKE -> {
                 ultWaveStyle = AbilityVfxStyle.METEOR_BURST
-                val burstDmg = 28f + pwrBonus * 3f
-                val delta = rival.position - ball.position
-                val dist = delta.length().coerceAtLeast(1f)
-                rival.currentHp = max(0f, rival.currentHp - burstDmg)
-                rival.hitFlashTimer = 0.90f
-                val pushDir = sanitizeLaunchAngle(delta / dist)
-                rival.resumeDirection = pushDir
-                if (!rival.isStunned) {
-                    rival.velocity = pushDir * (computeTargetCruiseSpeed(rival) * 1.28f)
-                }
-                spawnFireHazard(ball.id, rival.position.x, rival.position.y, rival.radius * 1.05f, 4.2f, ball.character.auraColor)
-                spawnShockwave(rival.position.x, rival.position.y, ball.character.auraColor, rival.radius * 3.6f, AbilityVfxStyle.METEOR_BURST, 0.48f)
-                spawnFloatingText("-${burstDmg.toInt()} ${ball.character.ultimateName.uppercase()}!", rival.position.x, rival.position.y - rival.radius, ball.character.auraColor, isCrit = true)
+                spawnFloatingText("$prefix${ball.character.ultimateName.uppercase()}!", ball.position.x, ball.position.y - ball.radius * 1.25f, ball.character.auraColor, isCrit = true)
             }
 
             UltimateArchetype.GRAVITY_CRUSH -> {
                 ultWaveStyle = AbilityVfxStyle.GRAVITY_IMPLODE
-                val crushDmg = 22f + pwrBonus * 2.5f
-                rival.currentHp = max(0f, rival.currentHp - crushDmg)
-                rival.hitFlashTimer = 0.85f
-                if (rival.velocity.length() > 1f) rival.resumeDirection = rival.velocity.normalized()
-                rival.stunTimeRemaining = 0.85f
-                rival.slowTimer = 2.8f
-                spawnShockwave(rival.position.x, rival.position.y, ball.character.auraColor, rival.radius * 3.3f, AbilityVfxStyle.GRAVITY_IMPLODE, 0.50f)
-                spawnFloatingText("-${crushDmg.toInt()} ${ball.character.ultimateName.uppercase()}!", rival.position.x, rival.position.y - rival.radius, ball.character.auraColor, isCrit = true)
+                rival.slowTimer = max(rival.slowTimer, 2.2f)
+                spawnFloatingText("$prefix${ball.character.ultimateName.uppercase()}!", ball.position.x, ball.position.y - ball.radius * 1.25f, ball.character.auraColor, isCrit = true)
             }
 
             UltimateArchetype.HEAL_REFORGE -> {
@@ -481,20 +800,14 @@ class BattleSimulation(
 
             UltimateArchetype.SOUL_DEVOUR -> {
                 ultWaveStyle = AbilityVfxStyle.GRAVITY_IMPLODE
-                val drainHp = 22f + pwrBonus * 2.5f
-                rival.currentHp = max(0f, rival.currentHp - drainHp)
-                rival.hitFlashTimer = 0.8f
-                ball.currentHp = min(ball.maxHp, ball.currentHp + drainHp)
-                rival.ultimateGauge = max(0f, rival.ultimateGauge - 24f)
-                spawnShockwave(rival.position.x, rival.position.y, Color(0xFF38BDF8), rival.radius * 2.8f, AbilityVfxStyle.GRAVITY_IMPLODE, 0.42f)
-                spawnFloatingText("±${drainHp.toInt()} STEAL!", ball.position.x, ball.position.y - ball.radius * 1.25f, Color(0xFF38BDF8), isCrit = true)
+                rival.ultimateGauge = max(0f, rival.ultimateGauge - 20f)
+                spawnFloatingText("$prefix${ball.character.ultimateName.uppercase()}!", ball.position.x, ball.position.y - ball.radius * 1.25f, Color(0xFF38BDF8), isCrit = true)
             }
 
             UltimateArchetype.HAZARD_STORM -> {
                 ultWaveStyle = AbilityVfxStyle.METEOR_BURST
-                spawnFireHazard(ball.id, ball.position.x, ball.position.y, ball.radius * 1.15f, 4.6f, ball.character.auraColor)
-                spawnFireHazard(ball.id, rival.position.x, rival.position.y, ball.radius * 0.98f, 4.2f, ball.character.auraColor)
-                spawnFireHazard(ball.id, arenaWidth * 0.5f, arenaHeight * 0.5f, ball.radius * 1.10f, 4.4f, ball.character.auraColor)
+                spawnFireHazard(ball.id, ball.position.x, ball.position.y, ball.radius * 1.15f, 4.4f, ball.character.auraColor)
+                spawnFireHazard(ball.id, arenaWidth * 0.5f, arenaHeight * 0.5f, ball.radius * 1.05f, 4.2f, ball.character.auraColor)
                 spawnFloatingText("$prefix${ball.character.ultimateName.uppercase()}!", ball.position.x, ball.position.y - ball.radius * 1.25f, ball.character.auraColor, isCrit = true)
             }
 
@@ -521,10 +834,11 @@ class BattleSimulation(
                 }
                 ball.speedBoostMultiplier = 1.25f
                 ball.speedBoostTimer = 1.4f
-                val label = if (ball.character.id == "guts_berserk") {
-                    "${prefix}GIANT SWORD! BERSERKER!"
-                } else {
-                    "$prefix${ball.character.ultimateName.uppercase()}!"
+                val label = when {
+                    ball.character.id == "guts_berserk" -> "${prefix}GIANT SWORD! BERSERKER!"
+                    ball.character.id == "gilgamesh_babylon" -> "${prefix}GATE OF BABYLON!"
+                    ball.character.id == "minato_flash" -> "${prefix}FLYING RAIJIN!"
+                    else -> "$prefix${ball.character.ultimateName.uppercase()}!"
                 }
                 spawnFloatingText(
                     label,
@@ -536,12 +850,500 @@ class BattleSimulation(
             }
         }
 
+        // Launch canon visible projectiles toward the opposing character!
+        spawnCanonUltimateProjectiles(ball, rival)
+
         spawnShockwave(ball.position.x, ball.position.y, ball.character.auraColor, ball.radius * 4.1f, ultWaveStyle, 0.48f)
         spawnImpactBurst(ball.position.x, ball.position.y, ball.character.auraColor, engineSettings.renderMode.particleCountOnHit)
         screenShakeAmount = 20f
         onUltimateActivated(isPlayer, ball.character.ultimateName)
         checkKnockoutState()
         return true
+    }
+
+    /**
+     * Spawns the character's canon Ultimate projectiles that visibly materialize, shoot out
+     * toward the opposing character, deal real impact damage/effects, and smoothly fade out!
+     */
+    private fun spawnCanonUltimateProjectiles(caster: CombatBall, rival: CombatBall) {
+        val style = caster.character.canonProjectileStyle
+        val pwr = caster.upgrades.powerLevel
+        val projScale = caster.matchupBalance.projectileScale
+        val toRival = computeAimDirectionAtRival(caster.position, rival, leadSec = 0.14f)
+        val baseAngle = atan2(toRival.y, toRival.x)
+
+        when (style) {
+            CanonProjectileStyle.HOLLOW_PURPLE_ORB -> {
+                // Gojo Satoru: Giant swirling Hollow Purple orb (Red + Blue -> Violet) that shoots out and fades out!
+                val speed = baseArenaSpeed * 1.28f
+                val radius = caster.radius * 0.78f * projScale
+                enqueueProjectile(
+                    AbilityProjectile(
+                        id = nextEntityId++,
+                        ownerId = caster.id,
+                        style = style,
+                        x = caster.position.x + toRival.x * caster.radius * 0.65f,
+                        y = caster.position.y + toRival.y * caster.radius * 0.65f,
+                        vx = toRival.x * speed,
+                        vy = toRival.y * speed,
+                        angle = baseAngle,
+                        speed = speed,
+                        radius = radius,
+                        damage = 30f + pwr * 2.5f,
+                        primaryColor = Color(0xFFA855F7),
+                        secondaryColor = Color(0xFF38BDF8),
+                        hoverTimer = 0.10f,
+                        anchorOffsetX = toRival.x * caster.radius * 0.75f,
+                        anchorOffsetY = toRival.y * caster.radius * 0.75f,
+                        life = 1.9f,
+                        maxLife = 1.9f,
+                        maxFadeOut = 0.48f,
+                        piercesThrough = true
+                    )
+                )
+            }
+
+            CanonProjectileStyle.BABYLON_SWORD_RAIN -> {
+                // Gilgamesh / EMIYA / Byakuya: Multiple visible swords appear in golden/arcane portals
+                // around the caster, lock onto the opposing character, and launch sequentially!
+                val count = (6 + min(2, caster.matchupBalance.extraVolleyCount)).coerceIn(6, 8)
+                val speed = baseArenaSpeed * 1.54f
+                val arcSpan = 2.0f // radians fanned behind/beside caster
+                val primary = if (caster.character.id == "gilgamesh_babylon") Color(0xFFFACC15) else caster.character.auraColor
+                val secondary = if (caster.character.id == "gilgamesh_babylon") Color(0xFFFEF08A) else Color.White
+                for (i in 0 until count) {
+                    val frac = if (count > 1) i.toFloat() / (count - 1).toFloat() else 0.5f
+                    val fanAngle = baseAngle + Math.PI.toFloat() * 0.5f * (frac * 2f - 1f) * (arcSpan * 0.55f)
+                    val orbitDist = caster.radius * (1.35f + (i % 2) * 0.28f)
+                    val offX = cos(fanAngle) * orbitDist
+                    val offY = sin(fanAngle) * orbitDist
+                    enqueueProjectile(
+                        AbilityProjectile(
+                            id = nextEntityId++,
+                            ownerId = caster.id,
+                            style = style,
+                            x = caster.position.x + offX,
+                            y = caster.position.y + offY,
+                            vx = toRival.x * speed,
+                            vy = toRival.y * speed,
+                            angle = baseAngle,
+                            speed = speed,
+                            radius = caster.radius * 0.34f * projScale,
+                            damage = 6.5f + pwr * 0.65f,
+                            primaryColor = primary,
+                            secondaryColor = secondary,
+                            hoverTimer = 0.10f + i * 0.08f,
+                            anchorOffsetX = offX,
+                            anchorOffsetY = offY,
+                            life = 1.65f,
+                            maxLife = 1.65f,
+                            maxFadeOut = 0.30f,
+                            piercesThrough = false
+                        )
+                    )
+                }
+            }
+
+            CanonProjectileStyle.FLYING_RAIJIN_KUNAI -> {
+                // Minato / Tobirama / Shinobi: Throws 3 fast golden kunai; center kunai warps caster behind rival on hit!
+                val speed = baseArenaSpeed * 1.62f
+                val spreads = floatArrayOf(-0.16f, 0f, 0.16f)
+                for (i in spreads.indices) {
+                    val dir = toRival.rotate(spreads[i]).normalized()
+                    enqueueProjectile(
+                        AbilityProjectile(
+                            id = nextEntityId++,
+                            ownerId = caster.id,
+                            style = style,
+                            x = caster.position.x + dir.x * caster.radius * 0.8f,
+                            y = caster.position.y + dir.y * caster.radius * 0.8f,
+                            vx = dir.x * speed,
+                            vy = dir.y * speed,
+                            angle = atan2(dir.y, dir.x),
+                            speed = speed,
+                            radius = caster.radius * 0.32f * projScale,
+                            damage = 8.5f + pwr * 0.75f,
+                            primaryColor = Color(0xFFFACC15),
+                            secondaryColor = Color(0xFF38BDF8),
+                            life = 1.45f,
+                            maxLife = 1.45f,
+                            maxFadeOut = 0.28f,
+                            piercesThrough = false,
+                            teleportsOwnerBehindOnHit = (i == 1)
+                        )
+                    )
+                }
+            }
+
+            CanonProjectileStyle.BULLET_CANNON_VOLLEY -> {
+                val speed = baseArenaSpeed * 1.65f
+                for (i in 0 until 3) {
+                    val spread = (i - 1) * 0.10f
+                    val dir = toRival.rotate(spread).normalized()
+                    enqueueProjectile(
+                        AbilityProjectile(
+                            id = nextEntityId++,
+                            ownerId = caster.id,
+                            style = style,
+                            x = caster.position.x + dir.x * caster.radius * 0.85f,
+                            y = caster.position.y + dir.y * caster.radius * 0.85f,
+                            vx = dir.x * speed,
+                            vy = dir.y * speed,
+                            angle = atan2(dir.y, dir.x),
+                            speed = speed,
+                            radius = caster.radius * 0.28f * projScale,
+                            damage = 8.0f + pwr * 0.7f,
+                            primaryColor = caster.character.auraColor,
+                            secondaryColor = Color(0xFFFEF08A),
+                            hoverTimer = i * 0.07f,
+                            anchorOffsetX = dir.x * caster.radius * 0.85f,
+                            anchorOffsetY = dir.y * caster.radius * 0.85f,
+                            life = 1.4f,
+                            maxLife = 1.4f,
+                            maxFadeOut = 0.28f
+                        )
+                    )
+                }
+            }
+
+            else -> {
+                // Ki Blasts, Zoltraak Beams, Crimson Slash Waves, Fire Meteors, Lightning Spears,
+                // Gravity Dark Orbs & Psychic Shockwaves: shoot directly at rival and fade out!
+                val isHeavyUlt = caster.character.ultimateArchetype in setOf(
+                    UltimateArchetype.METEOR_NUKE,
+                    UltimateArchetype.GRAVITY_CRUSH,
+                    UltimateArchetype.SOUL_DEVOUR,
+                    UltimateArchetype.DOMAIN_STUN
+                )
+                val baseDmg = if (isHeavyUlt) (24f + pwr * 2.4f) else (18f + pwr * 1.8f)
+                val speedMult = when (style) {
+                    CanonProjectileStyle.ZOLTRAAK_ARCANE_BEAM,
+                    CanonProjectileStyle.LIGHTNING_SPEAR -> 1.62f
+                    CanonProjectileStyle.KI_ENERGY_BLAST,
+                    CanonProjectileStyle.CRIMSON_SLASH_WAVE -> 1.44f
+                    CanonProjectileStyle.GRAVITY_DARK_ORB,
+                    CanonProjectileStyle.FIRE_METEOR_ORB -> 1.26f
+                    else -> 1.38f
+                }
+                val radiusFactor = when (style) {
+                    CanonProjectileStyle.FIRE_METEOR_ORB,
+                    CanonProjectileStyle.GRAVITY_DARK_ORB -> 0.64f
+                    CanonProjectileStyle.KI_ENERGY_BLAST,
+                    CanonProjectileStyle.CRIMSON_SLASH_WAVE -> 0.58f
+                    else -> 0.48f
+                }
+                val pierces = style in setOf(
+                    CanonProjectileStyle.KI_ENERGY_BLAST,
+                    CanonProjectileStyle.ZOLTRAAK_ARCANE_BEAM,
+                    CanonProjectileStyle.CRIMSON_SLASH_WAVE,
+                    CanonProjectileStyle.PSYCHIC_FORCE_SHOT
+                )
+                val speed = baseArenaSpeed * speedMult
+                enqueueProjectile(
+                    AbilityProjectile(
+                        id = nextEntityId++,
+                        ownerId = caster.id,
+                        style = style,
+                        x = caster.position.x + toRival.x * caster.radius * 0.8f,
+                        y = caster.position.y + toRival.y * caster.radius * 0.8f,
+                        vx = toRival.x * speed,
+                        vy = toRival.y * speed,
+                        angle = baseAngle,
+                        speed = speed,
+                        radius = caster.radius * radiusFactor * projScale,
+                        damage = baseDmg,
+                        primaryColor = caster.character.auraColor,
+                        secondaryColor = caster.character.secondaryColor,
+                        life = 1.75f,
+                        maxLife = 1.75f,
+                        maxFadeOut = 0.40f,
+                        piercesThrough = pierces
+                    )
+                )
+            }
+        }
+    }
+
+    /**
+     * Spawns follow-up canon projectiles during active Ultimate or signature bounce shots
+     * for magic/ranged/AoE/sword-gate characters!
+     */
+    private fun spawnCanonFollowUpShot(caster: CombatBall, rival: CombatBall, isUltVolley: Boolean) {
+        val style = caster.character.canonProjectileStyle
+        val pwr = caster.upgrades.powerLevel
+        val projScale = caster.matchupBalance.projectileScale
+        val toRival = computeAimDirectionAtRival(caster.position, rival, leadSec = 0.12f)
+        val baseAngle = atan2(toRival.y, toRival.x)
+
+        if (style == CanonProjectileStyle.BABYLON_SWORD_RAIN && isUltVolley) {
+            val speed = baseArenaSpeed * 1.52f
+            val primary = if (caster.character.id == "gilgamesh_babylon") Color(0xFFFACC15) else caster.character.auraColor
+            for (k in -1..1 step 2) {
+                val sideAngle = baseAngle + k * 1.25f
+                val offX = cos(sideAngle) * caster.radius * 1.3f
+                val offY = sin(sideAngle) * caster.radius * 1.3f
+                enqueueProjectile(
+                    AbilityProjectile(
+                        id = nextEntityId++,
+                        ownerId = caster.id,
+                        style = style,
+                        x = caster.position.x + offX,
+                        y = caster.position.y + offY,
+                        vx = toRival.x * speed,
+                        vy = toRival.y * speed,
+                        angle = baseAngle,
+                        speed = speed,
+                        radius = caster.radius * 0.30f * projScale,
+                        damage = 5.5f + pwr * 0.5f,
+                        primaryColor = primary,
+                        secondaryColor = Color(0xFFFEF08A),
+                        hoverTimer = if (k < 0) 0.08f else 0.16f,
+                        anchorOffsetX = offX,
+                        anchorOffsetY = offY,
+                        life = 1.45f,
+                        maxLife = 1.45f,
+                        maxFadeOut = 0.28f
+                    )
+                )
+            }
+            return
+        }
+
+        val speed = baseArenaSpeed * 1.42f
+        val dmg = if (isUltVolley) (8.5f + pwr * 0.7f) else (7.0f + pwr * 0.5f)
+        val rad = caster.radius * (if (style == CanonProjectileStyle.HOLLOW_PURPLE_ORB) 0.52f else 0.36f) * projScale
+        val primary = if (style == CanonProjectileStyle.HOLLOW_PURPLE_ORB) Color(0xFFA855F7) else caster.character.auraColor
+        val secondary = if (style == CanonProjectileStyle.HOLLOW_PURPLE_ORB) Color(0xFF38BDF8) else caster.character.secondaryColor
+        enqueueProjectile(
+            AbilityProjectile(
+                id = nextEntityId++,
+                ownerId = caster.id,
+                style = style,
+                x = caster.position.x + toRival.x * caster.radius * 0.85f,
+                y = caster.position.y + toRival.y * caster.radius * 0.85f,
+                vx = toRival.x * speed,
+                vy = toRival.y * speed,
+                angle = baseAngle,
+                speed = speed,
+                radius = rad,
+                damage = dmg,
+                primaryColor = primary,
+                secondaryColor = secondary,
+                life = 1.45f,
+                maxLife = 1.45f,
+                maxFadeOut = 0.32f,
+                piercesThrough = style == CanonProjectileStyle.HOLLOW_PURPLE_ORB || style == CanonProjectileStyle.ZOLTRAAK_ARCANE_BEAM,
+                teleportsOwnerBehindOnHit = isUltVolley && style == CanonProjectileStyle.FLYING_RAIJIN_KUNAI && caster.character.id == "minato_flash"
+            )
+        )
+    }
+
+    private fun shouldFireBounceAbilityShot(char: CharacterData): Boolean {
+        return char.element == ElementTag.MAGIC ||
+            char.element == ElementTag.FIRE ||
+            char.element == ElementTag.ELEC ||
+            char.classType == CharacterClass.CONTROL_MAGIC ||
+            char.canonProjectileStyle in setOf(
+                CanonProjectileStyle.HOLLOW_PURPLE_ORB,
+                CanonProjectileStyle.BABYLON_SWORD_RAIN,
+                CanonProjectileStyle.FLYING_RAIJIN_KUNAI,
+                CanonProjectileStyle.KI_ENERGY_BLAST,
+                CanonProjectileStyle.ZOLTRAAK_ARCANE_BEAM,
+                CanonProjectileStyle.GRAVITY_DARK_ORB,
+                CanonProjectileStyle.BULLET_CANNON_VOLLEY
+            )
+    }
+
+    private fun computeAimDirectionAtRival(origin: Vector2, rival: CombatBall, leadSec: Float): Vector2 {
+        val predicted = predictReflectedPosition(rival.position, rival.velocity, leadSec)
+        val delta = predicted - origin
+        if (delta.length() > 1f) return delta.normalized()
+        val direct = rival.position - origin
+        return if (direct.length() > 1f) direct.normalized() else Vector2(0f, -1f)
+    }
+
+    private fun enqueueProjectile(proj: AbilityProjectile) {
+        val cap = when (engineSettings.renderMode) {
+            RenderMode.PIXELIZED -> 10
+            RenderMode.BALANCED -> 16
+            RenderMode.REALISTIC -> 20
+            RenderMode.ULTRA -> 24
+        }
+        while (projectiles.size >= cap && projectiles.isNotEmpty()) {
+            projectiles.removeAt(0)
+        }
+        projectiles.add(proj)
+    }
+
+    private fun updateProjectiles(dt: Float) {
+        var idx = projectiles.size - 1
+        while (idx >= 0) {
+            val proj = projectiles[idx]
+
+            // 1. Smoothly fade out after hitting rival, hitting wall, or reaching max range!
+            if (proj.fadeOutTimer >= 0f) {
+                proj.fadeOutTimer -= dt
+                proj.x += proj.vx * dt * 0.36f
+                proj.y += proj.vy * dt * 0.36f
+                if (proj.fadeOutTimer <= 0f) {
+                    projectiles.removeAt(idx)
+                }
+                idx--
+                continue
+            }
+
+            val ownerIsPlayer = proj.ownerId == playerBall.id
+            val owner = if (ownerIsPlayer) playerBall else opponentBall
+            val rival = if (ownerIsPlayer) opponentBall else playerBall
+
+            // 2. Materializing / Hovering Gate phase (e.g., Gilgamesh's multiple visible swords aiming at rival!)
+            if (proj.hoverTimer > 0f) {
+                proj.hoverTimer -= dt
+                proj.x = owner.position.x + proj.anchorOffsetX
+                proj.y = owner.position.y + proj.anchorOffsetY
+                val aim = computeAimDirectionAtRival(Vector2(proj.x, proj.y), rival, leadSec = 0.10f)
+                proj.angle = atan2(aim.y, aim.x)
+                if (proj.hoverTimer <= 0f) {
+                    proj.vx = aim.x * proj.speed
+                    proj.vy = aim.y * proj.speed
+                    spawnShockwave(proj.x, proj.y, proj.primaryColor, proj.radius * 1.6f, AbilityVfxStyle.SHOCKWAVE, 0.22f)
+                }
+                idx--
+                continue
+            }
+
+            // 3. Active flight across the arena toward the opposing character (with swept segment collision)
+            val prevX = proj.x
+            val prevY = proj.y
+            proj.x += proj.vx * dt
+            proj.y += proj.vy * dt
+            proj.life -= dt
+
+            // Check swept segment collision with opposing character so fast swords/kunai never tunnel
+            if (!proj.hasHit && !rival.isDead) {
+                val segDx = proj.x - prevX
+                val segDy = proj.y - prevY
+                val segLenSq = segDx * segDx + segDy * segDy
+                val t = if (segLenSq > 0.001f) {
+                    (((rival.position.x - prevX) * segDx + (rival.position.y - prevY) * segDy) / segLenSq).coerceIn(0f, 1f)
+                } else {
+                    1f
+                }
+                val closestX = prevX + segDx * t
+                val closestY = prevY + segDy * t
+                val dx = rival.position.x - closestX
+                val dy = rival.position.y - closestY
+                val hitDist = rival.radius + proj.radius * 0.85f
+                if (dx * dx + dy * dy <= hitDist * hitDist) {
+                    proj.x = closestX
+                    proj.y = closestY
+                    proj.hasHit = true
+                    proj.fadeOutTimer = proj.maxFadeOut
+                    if (proj.piercesThrough) {
+                        proj.vx *= 0.62f
+                        proj.vy *= 0.62f
+                    } else {
+                        proj.vx *= 0.22f
+                        proj.vy *= 0.22f
+                    }
+
+                    // Roll rival's automatic chance-based counter against the incoming projectile!
+                    if (!tryAutoCounter(rival, owner, proj.damage, isPlayerDefender = !ownerIsPlayer)) {
+                        var dmg = proj.damage * owner.matchupBalance.damageMultiplier
+                        if (!isRemoteMultiplayer && activeBotDifficulty == BotDifficulty.EASY) {
+                            dmg *= if (ownerIsPlayer) 1.18f else 0.68f
+                        }
+                        if (rival.character.passiveArchetype == PassiveArchetype.INFINITY_BARRIER) {
+                            dmg *= 0.82f
+                            rival.isShieldActive = true
+                            rival.shieldVisualTimer = 0.7f
+                        }
+
+                        val finalDmg = max(1, dmg.toInt())
+                        rival.currentHp = max(0f, rival.currentHp - finalDmg)
+                        rival.hitFlashTimer = 0.80f
+
+                        // Knockback from projectile hit
+                        val flightDir = Vector2(proj.vx, proj.vy)
+                        if (flightDir.length() > 1f && !rival.isStunned) {
+                            val push = sanitizeLaunchAngle(flightDir.normalized())
+                            rival.resumeDirection = push
+                            val kbMult = if (proj.style == CanonProjectileStyle.HOLLOW_PURPLE_ORB) 1.38f else 1.12f
+                            rival.velocity = push * (computeTargetCruiseSpeed(rival) * kbMult)
+                        }
+
+                        // Canon projectile special effects
+                        if (proj.teleportsOwnerBehindOnHit && !owner.isDead) {
+                            teleportBehindTarget(owner, rival)
+                            spawnFloatingText(
+                                "FLYING RAIJIN!",
+                                owner.position.x,
+                                owner.position.y - owner.radius * 1.2f,
+                                Color(0xFFFACC15),
+                                isCrit = true
+                            )
+                        }
+                        when (proj.style) {
+                            CanonProjectileStyle.HOLLOW_PURPLE_ORB -> {
+                                screenShakeAmount = max(screenShakeAmount, 22f)
+                                spawnShockwave(proj.x, proj.y, Color(0xFFA855F7), rival.radius * 3.4f, AbilityVfxStyle.DOMAIN_SIGIL, 0.45f)
+                            }
+                            CanonProjectileStyle.BABYLON_SWORD_RAIN,
+                            CanonProjectileStyle.CRIMSON_SLASH_WAVE -> {
+                                spawnShockwave(proj.x, proj.y, proj.primaryColor, rival.radius * 2.2f, AbilityVfxStyle.SLASH_CROSS, 0.32f)
+                            }
+                            CanonProjectileStyle.FIRE_METEOR_ORB -> {
+                                rival.burnTicksRemaining = max(rival.burnTicksRemaining, 2)
+                                rival.burnTimer = 0f
+                                spawnShockwave(proj.x, proj.y, proj.primaryColor, rival.radius * 2.6f, AbilityVfxStyle.METEOR_BURST, 0.36f)
+                            }
+                            CanonProjectileStyle.GRAVITY_DARK_ORB -> {
+                                rival.slowTimer = max(rival.slowTimer, 1.6f)
+                                if (owner.character.ultimateArchetype == UltimateArchetype.SOUL_DEVOUR) {
+                                    owner.currentHp = min(owner.maxHp, owner.currentHp + finalDmg * 0.65f)
+                                }
+                                spawnShockwave(proj.x, proj.y, proj.primaryColor, rival.radius * 2.6f, AbilityVfxStyle.GRAVITY_IMPLODE, 0.36f)
+                            }
+                            CanonProjectileStyle.LIGHTNING_SPEAR -> {
+                                spawnShockwave(proj.x, proj.y, proj.primaryColor, rival.radius * 2.2f, AbilityVfxStyle.LIGHTNING_NOVA, 0.32f)
+                            }
+                            else -> {
+                                spawnShockwave(proj.x, proj.y, proj.primaryColor, rival.radius * 2.1f, AbilityVfxStyle.SHOCKWAVE, 0.30f)
+                            }
+                        }
+
+                        spawnImpactBurst(proj.x, proj.y, proj.primaryColor, max(3, engineSettings.renderMode.particleCountOnHit / 2))
+                        owner.addUltimate(3.5f)
+                        rival.addUltimate(3.5f)
+
+                        val moveName = LorePowerBalancer.resolveCanonProjectileName(owner.character)
+                        spawnFloatingText(
+                            text = "-$finalDmg",
+                            x = rival.position.x,
+                            y = rival.position.y - rival.radius * 1.05f,
+                            color = proj.primaryColor,
+                            isCrit = finalDmg >= 16
+                        )
+                        onCollisionImpact(ownerIsPlayer, finalDmg, finalDmg >= 16, moveName)
+                    }
+                    idx--
+                    continue
+                }
+            }
+
+            // Start smooth fade-out if projectile reaches arena boundary or max lifetime
+            val pad = wallPadding
+            if (proj.life <= 0f ||
+                proj.x <= pad || proj.x >= arenaWidth - pad ||
+                proj.y <= pad || proj.y >= arenaHeight - pad
+            ) {
+                proj.fadeOutTimer = proj.maxFadeOut
+                proj.vx *= 0.22f
+                proj.vy *= 0.22f
+            }
+
+            idx--
+        }
     }
 
     fun update(rawDt: Float) {
@@ -566,6 +1368,7 @@ class BattleSimulation(
         opponentBall.passiveFlashTimer = max(0f, opponentBall.passiveFlashTimer - rawDt * 2.1f)
 
         if (!isRoundActive) {
+            updateProjectiles(dt)
             updateVfx(dt)
             return
         }
@@ -573,6 +1376,8 @@ class BattleSimulation(
         if (isClashStarted) {
             updateUltimate(playerBall, dt, isPlayer = true)
             updateUltimate(opponentBall, dt, isPlayer = false)
+            updateCounterTimers(playerBall, rawDt)
+            updateCounterTimers(opponentBall, rawDt)
             updateStatusEffects(playerBall, dt)
             updateStatusEffects(opponentBall, dt)
             updateHazards(dt)
@@ -586,6 +1391,11 @@ class BattleSimulation(
                 checkWallCollision(opponentBall)
                 checkBallToBallCollision()
             }
+            updateProjectiles(dt)
+        } else {
+            updateCounterTimers(playerBall, rawDt)
+            updateCounterTimers(opponentBall, rawDt)
+            updateProjectiles(dt)
         }
 
         updateProceduralVisuals(playerBall, dt)
@@ -595,8 +1405,25 @@ class BattleSimulation(
         checkKnockoutState()
     }
 
+    private fun updateCounterTimers(ball: CombatBall, dt: Float) {
+        if (ball.counterActiveTimer > 0f) {
+            ball.counterActiveTimer = max(0f, ball.counterActiveTimer - dt)
+            if (ball.counterActiveTimer <= 0f) {
+                ball.counterCooldownRemaining = ball.counterCooldownSec
+            }
+        } else if (ball.counterCooldownRemaining > 0f) {
+            ball.counterCooldownRemaining = max(0f, ball.counterCooldownRemaining - dt)
+        }
+    }
+
     private fun checkKnockoutState() {
         if (!isRoundActive) return
+        // In remote multiplayer, Guest waits for Host's authoritative KO so both players ALWAYS see the exact same winner!
+        if (isRemoteMultiplayer && isGuestClient) {
+            if (playerBall.currentHp <= 0f) playerBall.currentHp = 1f
+            if (opponentBall.currentHp <= 0f) opponentBall.currentHp = 1f
+            return
+        }
         if (playerBall.isDead) {
             isRoundActive = false
             slowMoScale = 0.25f
@@ -655,6 +1482,12 @@ class BattleSimulation(
 
         if (ball.isUltimateActive) {
             ball.ultimateTimeRemaining -= dt
+            ball.ultVolleyTimer -= dt
+            if (ball.ultVolleyTimer <= 0f && !ball.isStunned) {
+                ball.ultVolleyTimer = if (ball.character.canonProjectileStyle == CanonProjectileStyle.BABYLON_SWORD_RAIN) 1.25f else 1.45f
+                val rival = if (isPlayer) opponentBall else playerBall
+                spawnCanonFollowUpShot(ball, rival, isUltVolley = true)
+            }
 
             val trailCd = if (isPlayer) playerTrailCooldown else aiTrailCooldown
             val leavesTrail = ball.character.ultimateArchetype == UltimateArchetype.HAZARD_STORM ||
@@ -667,6 +1500,7 @@ class BattleSimulation(
             if (ball.ultimateTimeRemaining <= 0f) {
                 ball.isUltimateActive = false
                 ball.ultimateTimeRemaining = 0f
+                ball.ultVolleyTimer = 0f
                 ball.isSeriousActive = false
                 ball.kamuiBounceStacks = 0
                 ball.ultimateGauge = 0f
@@ -822,6 +1656,9 @@ class BattleSimulation(
 
             val speed = max(ball.velocity.length(), computeTargetCruiseSpeed(ball))
             val rival = if (isPlayer) opponentBall else playerBall
+            if (!ball.isUltimateActive && ball.totalWallBounces % 5 == 0 && shouldFireBounceAbilityShot(ball.character)) {
+                spawnCanonFollowUpShot(ball, rival, isUltVolley = false)
+            }
             val toRival = (rival.position - ball.position).normalized()
             val blendedDir = sanitizeLaunchAngle((ball.velocity.normalized() * 0.88f + toRival * 0.12f).normalized())
 
@@ -882,11 +1719,14 @@ class BattleSimulation(
         val velAlongNormal = relVel.dot(normal)
         if (velAlongNormal > 0f && collisionCooldown > 0f) return
 
-        val pSpeed = playerBall.velocity.length()
-        val oSpeed = opponentBall.velocity.length()
+        val prePlayerVel = playerBall.velocity
+        val preOpponentVel = opponentBall.velocity
+        val pSpeed = prePlayerVel.length()
+        val oSpeed = preOpponentVel.length()
         val isPlayerAttacker = pSpeed >= oSpeed
         val attacker = if (isPlayerAttacker) playerBall else opponentBall
         val defender = if (isPlayerAttacker) opponentBall else playerBall
+        val preAttackerVel = if (isPlayerAttacker) prePlayerVel else preOpponentVel
 
         val m1 = playerBall.character.massRating *
             (if (playerBall.character.passiveArchetype == PassiveArchetype.TITAN_JUGGERNAUT) 1.55f else 1f)
@@ -929,7 +1769,7 @@ class BattleSimulation(
         if (collisionCooldown > 0f) return
         collisionCooldown = 0.22f
 
-        resolveCollisionCombat(attacker, defender, isPlayerAttacker, pSpeed, oSpeed)
+        resolveCollisionCombat(attacker, defender, isPlayerAttacker, pSpeed, oSpeed, preAttackerVel)
         attacker.wallBounceCombo = 0
     }
 
@@ -942,7 +1782,8 @@ class BattleSimulation(
         defender: CombatBall,
         isPlayerAttacker: Boolean,
         pSpeed: Float,
-        oSpeed: Float
+        oSpeed: Float,
+        preAttackerVel: Vector2
     ) {
         attacker.hitCounter++
         val bankPerBounce = if (attacker.character.passiveArchetype == PassiveArchetype.ELASTIC_MOMENTUM) 4 else 2
@@ -973,6 +1814,31 @@ class BattleSimulation(
         } else if (attacker.isUltimateActive) {
             damage *= attacker.effectiveUltMultiplier
             isCrit = true
+        }
+
+        // --- AUTOMATIC CHANCE-BASED COUNTER INTERCEPTION (Zero damage to countering ball + canon counterattack!) ---
+        if (tryAutoCounter(
+                defender = defender,
+                attacker = attacker,
+                incomingDamage = damage,
+                isPlayerDefender = !isPlayerAttacker,
+                attackerFacingOverride = preAttackerVel
+            )
+        ) {
+            return
+        }
+
+        // --- ANIME LORE, RACE, POWER SCALING & WORLD-BUILDING MATCHUP MODIFIER ---
+        damage *= attacker.matchupBalance.damageMultiplier
+        if (attacker.matchupBalance.lowHpZenkaiScale > 0f) {
+            val missingRatio = ((attacker.maxHp - attacker.currentHp) / attacker.maxHp.coerceAtLeast(1f)).coerceIn(0f, 1f)
+            damage *= (1f + missingRatio * attacker.matchupBalance.lowHpZenkaiScale)
+            if (missingRatio >= 0.45f) isCrit = true
+        }
+
+        // --- EASY AI DIFFICULTY SCALING (Ensures Easy Mode is genuinely forgiving for beginners) ---
+        if (!isRemoteMultiplayer && activeBotDifficulty == BotDifficulty.EASY) {
+            damage *= if (isPlayerAttacker) 1.22f else 0.68f
         }
 
         // --- ATTACKER PASSIVES (All 18 PassiveArchetypes — 100% functional across all 224 characters!) ---
@@ -1173,6 +2039,13 @@ class BattleSimulation(
             }
         }
 
+        if (isCrit) {
+            damage *= attacker.matchupBalance.critBonusMultiplier
+            if (attacker.matchupBalance.onCritHealFlat > 0f) {
+                attacker.currentHp = min(attacker.maxHp, attacker.currentHp + attacker.matchupBalance.onCritHealFlat)
+            }
+        }
+
         val finalDmg = max(1, damage.toInt())
         defender.currentHp = max(0f, defender.currentHp - finalDmg)
         defender.hitFlashTimer = 0.9f
@@ -1210,6 +2083,121 @@ class BattleSimulation(
         )
 
         onCollisionImpact(isPlayerAttacker, finalDmg, isCrit, activePassiveTag)
+    }
+
+    private fun resolveCounterPayoff(
+        counterBall: CombatBall,
+        attackerBall: CombatBall,
+        blockedDamage: Float,
+        isPlayerCountering: Boolean,
+        attackerFacingOverride: Vector2? = null
+    ) {
+        val archetype = counterBall.character.counterArchetype
+        counterBall.counterActiveTimer = 0f
+        counterBall.counterCooldownRemaining = counterBall.counterCooldownSec
+        counterBall.passiveFlashTimer = 0.90f
+        counterBall.shieldVisualTimer = max(counterBall.shieldVisualTimer, 0.55f)
+        counterBall.isShieldActive = true
+        counterBall.weaponSpinBurst = 22f
+        counterBall.addUltimate(15f)
+
+        val delta = attackerBall.position - counterBall.position
+        val pushDir = sanitizeLaunchAngle(if (delta.length() > 1f) delta.normalized() else Vector2(0.5f, -0.86f))
+        var counterDamage = 0
+
+        when (archetype) {
+            CounterArchetype.TELEPORT_STRIKE -> {
+                counterDamage = 18 + counterBall.upgrades.powerLevel * 2
+                counterBall.stunTimeRemaining = 0f
+                counterBall.slowTimer = 0f
+                if (attackerFacingOverride != null && attackerFacingOverride.length() > 20f && !attackerBall.isStunned) {
+                    val lungeDir = sanitizeLaunchAngle(attackerFacingOverride.normalized())
+                    attackerBall.resumeDirection = lungeDir
+                    attackerBall.velocity = lungeDir * computeTargetCruiseSpeed(attackerBall)
+                }
+                teleportBehindTarget(counterBall, attackerBall, attackerFacingOverride)
+                spawnShockwave(attackerBall.position.x, attackerBall.position.y, counterBall.character.auraColor, attackerBall.radius * 3.1f, AbilityVfxStyle.SLASH_CROSS, 0.44f)
+            }
+            CounterArchetype.GUARD_PARRY -> {
+                counterDamage = 12 + counterBall.upgrades.powerLevel
+                attackerBall.resumeDirection = pushDir
+                attackerBall.velocity = pushDir * (computeTargetCruiseSpeed(attackerBall) * 1.42f)
+                spawnShockwave(counterBall.position.x, counterBall.position.y, Color(0xFF38BDF8), counterBall.radius * 3.0f, AbilityVfxStyle.SHOCKWAVE, 0.42f)
+            }
+            CounterArchetype.TIME_IMMUNITY -> {
+                counterDamage = 16 + counterBall.upgrades.powerLevel * 2
+                counterBall.stunTimeRemaining = 0f
+                if (attackerBall.velocity.length() > 1f) attackerBall.resumeDirection = attackerBall.velocity.normalized()
+                attackerBall.velocity = Vector2.Zero
+                attackerBall.stunTimeRemaining = 0.72f
+                spawnShockwave(attackerBall.position.x, attackerBall.position.y, Color(0xFFFACC15), attackerBall.radius * 3.2f, AbilityVfxStyle.TIME_DIAL, 0.48f)
+            }
+            CounterArchetype.ANTI_MAGIC_NULL -> {
+                counterDamage = 15 + counterBall.upgrades.powerLevel * 2
+                counterBall.stunTimeRemaining = 0f
+                if (attackerBall.isUltimateActive) {
+                    attackerBall.isUltimateActive = false
+                    attackerBall.ultimateTimeRemaining = 0f
+                    attackerBall.isSeriousActive = false
+                    attackerBall.ultimateCooldownRemaining = attackerBall.effectiveUltCooldownSec * 0.75f
+                } else {
+                    attackerBall.ultimateGauge = max(0f, attackerBall.ultimateGauge - 28f)
+                }
+                spawnShockwave(attackerBall.position.x, attackerBall.position.y, Color(0xFFEF4444), attackerBall.radius * 3.2f, AbilityVfxStyle.SLASH_CROSS, 0.45f)
+            }
+            CounterArchetype.INFINITY_BARRIER_COUNTER -> {
+                counterDamage = 16 + counterBall.upgrades.powerLevel * 2
+                counterBall.stunTimeRemaining = 0f
+                attackerBall.resumeDirection = pushDir
+                attackerBall.velocity = pushDir * (computeTargetCruiseSpeed(attackerBall) * 1.65f)
+                spawnShockwave(counterBall.position.x, counterBall.position.y, Color(0xFF38BDF8), counterBall.radius * 3.4f, AbilityVfxStyle.DOMAIN_SIGIL, 0.46f)
+            }
+            CounterArchetype.STAND_RUSH_COUNTER -> {
+                counterDamage = 20 + counterBall.upgrades.powerLevel * 2
+                counterBall.stunTimeRemaining = 0f
+                attackerBall.resumeDirection = pushDir
+                attackerBall.velocity = pushDir * (computeTargetCruiseSpeed(attackerBall) * 1.48f)
+                val rushCall = counterBall.character.joJoStandStyle.battleCry.ifBlank { "STAND RUSH!" }
+                spawnFloatingText(rushCall, attackerBall.position.x, attackerBall.position.y - attackerBall.radius * 1.45f, Color(0xFFFACC15), isCrit = true)
+                spawnShockwave(attackerBall.position.x, attackerBall.position.y, counterBall.character.auraColor, attackerBall.radius * 3.4f, AbilityVfxStyle.SLASH_CROSS, 0.46f)
+            }
+            CounterArchetype.VECTOR_REFLECT_COUNTER -> {
+                counterDamage = max(14, (blockedDamage * 0.88f).toInt())
+                attackerBall.resumeDirection = pushDir
+                attackerBall.velocity = pushDir * (computeTargetCruiseSpeed(attackerBall) * 1.45f)
+                spawnShockwave(counterBall.position.x, counterBall.position.y, Color(0xFF4ADE80), counterBall.radius * 3.1f, AbilityVfxStyle.GRAVITY_IMPLODE, 0.44f)
+            }
+            CounterArchetype.SHADOW_DODGE -> {
+                counterDamage = 10 + counterBall.upgrades.powerLevel
+                counterBall.currentHp = min(counterBall.maxHp, counterBall.currentHp + 8f)
+                counterBall.speedBoostMultiplier = 1.38f
+                counterBall.speedBoostTimer = 1.15f
+                spawnShockwave(counterBall.position.x, counterBall.position.y, Color(0xFFA855F7), counterBall.radius * 2.8f, AbilityVfxStyle.LIGHTNING_NOVA, 0.40f)
+            }
+            CounterArchetype.TITAN_ARMOR_COUNTER -> {
+                counterDamage = 18 + counterBall.upgrades.powerLevel * 2
+                counterBall.stunTimeRemaining = 0f
+                attackerBall.stunTimeRemaining = 0.45f
+                attackerBall.velocity = Vector2.Zero
+                spawnShockwave(attackerBall.position.x, attackerBall.position.y, Color(0xFFF59E0B), attackerBall.radius * 3.3f, AbilityVfxStyle.METEOR_BURST, 0.45f)
+            }
+        }
+
+        if (counterDamage > 0) {
+            attackerBall.currentHp = max(0f, attackerBall.currentHp - counterDamage)
+            attackerBall.hitFlashTimer = 0.85f
+        }
+        screenShakeAmount = max(screenShakeAmount, 18f)
+        spawnImpactBurst(counterBall.position.x, counterBall.position.y, Color(0xFF38BDF8), engineSettings.renderMode.particleCountOnHit)
+        val canonCallout = LorePowerBalancer.resolveCanonCounterCallout(counterBall.character)
+        spawnFloatingText(
+            "$canonCallout -$counterDamage",
+            counterBall.position.x,
+            counterBall.position.y - counterBall.radius * 1.15f,
+            Color(0xFF38BDF8),
+            isCrit = true
+        )
+        onCollisionImpact(isPlayerCountering, counterDamage, true, archetype.simpleName)
     }
 
     private fun updateProceduralVisuals(ball: CombatBall, dt: Float) {
@@ -1303,8 +2291,8 @@ class BattleSimulation(
             if (particles.size >= cap && particles.isNotEmpty()) {
                 particles.removeAt(0)
             }
-            val angle = Random.nextFloat() * 2f * Math.PI.toFloat()
-            val speed = (130f + Random.nextFloat() * 360f) * speedScale
+            val angle = rng.nextFloat() * 2f * Math.PI.toFloat()
+            val speed = (130f + rng.nextFloat() * 360f) * speedScale
             particles.add(
                 Particle(
                     id = nextEntityId++,
@@ -1313,9 +2301,9 @@ class BattleSimulation(
                     vx = cos(angle) * speed,
                     vy = sin(angle) * speed,
                     color = if (i % 3 == 0) Color(0xFFFDE047) else color,
-                    life = 0.28f + Random.nextFloat() * 0.26f,
+                    life = 0.28f + rng.nextFloat() * 0.26f,
                     maxLife = 0.54f,
-                    size = (3.5f + Random.nextFloat() * 4.5f) * speedScale * 0.6f,
+                    size = (3.5f + rng.nextFloat() * 4.5f) * speedScale * 0.6f,
                     isPixel = engineSettings.renderMode == RenderMode.PIXELIZED
                 )
             )

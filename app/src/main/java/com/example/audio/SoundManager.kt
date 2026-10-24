@@ -17,6 +17,7 @@ enum class GameSfx {
     CRIT_CLASH,
     PASSIVE_TRIGGER,
     REDIRECT_DASH,
+    COUNTER_PARRY,
     AWAKENING_PLAYER,
     AWAKENING_AI,
     KNOCKOUT_FINISH,
@@ -112,6 +113,10 @@ class SoundManager(context: Context?) {
         play(GameSfx.REDIRECT_DASH, volume = 0.65f, pitch = 1.02f, minIntervalMs = 90L)
     }
 
+    fun playCounterParry() {
+        play(GameSfx.COUNTER_PARRY, volume = 0.86f, pitch = 1.04f, minIntervalMs = 90L)
+    }
+
     fun playAwakening(isPlayer: Boolean) {
         val sfx = if (isPlayer) GameSfx.AWAKENING_PLAYER else GameSfx.AWAKENING_AI
         play(sfx, volume = 0.95f, pitch = 1.0f, minIntervalMs = 180L)
@@ -181,6 +186,7 @@ class SoundManager(context: Context?) {
                 GameSfx.CRIT_CLASH -> 0.26f
                 GameSfx.PASSIVE_TRIGGER -> 0.22f
                 GameSfx.REDIRECT_DASH -> 0.15f
+                GameSfx.COUNTER_PARRY -> 0.28f
                 GameSfx.AWAKENING_PLAYER -> 0.46f
                 GameSfx.AWAKENING_AI -> 0.44f
                 GameSfx.KNOCKOUT_FINISH -> 0.55f
@@ -246,6 +252,18 @@ class SoundManager(context: Context?) {
                         (sin(phase1) * 0.68 + whoosh) * env
                     }
 
+                    GameSfx.COUNTER_PARRY -> {
+                        // Crisp anime blade/shield parry clang + harmonic time-warp shimmer
+                        val clangFreq = 987.77 + 440.0 * exp(-t * 22.0)
+                        val subFreq = 493.88
+                        phase1 += 2.0 * PI * clangFreq / SAMPLE_RATE
+                        phase2 += 2.0 * PI * subFreq / SAMPLE_RATE
+                        phase3 += 2.0 * PI * 1975.53 / SAMPLE_RATE
+                        val transient = (rng.nextDouble() * 2.0 - 1.0) * exp(-t * 55.0) * 0.45
+                        val env = exp(-t * 7.8)
+                        (sin(phase1) * 0.55 + sin(phase2) * 0.28 + sin(phase3) * 0.22) * env + transient
+                    }
+
                     GameSfx.AWAKENING_PLAYER -> {
                         // Heroic anime aura surge: rising harmonic triad + shimmer
                         val root = 220.0 + 440.0 * norm
@@ -303,7 +321,7 @@ class SoundManager(context: Context?) {
             return encodeMono16BitWav(samples, SAMPLE_RATE)
         }
 
-        private fun encodeMono16BitWav(samples: ShortArray, sampleRate: Int): ByteArray {
+        internal fun encodeMono16BitWav(samples: ShortArray, sampleRate: Int): ByteArray {
             val dataSize = samples.size * 2
             val totalDataLen = 36 + dataSize
             val byteRate = sampleRate * 2

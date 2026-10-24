@@ -75,6 +75,17 @@ object AnimeBallRenderer {
                 )
             }
 
+            StandAndAbilityRenderer.drawBehindSphereManifestations(
+                scope = this,
+                character = character,
+                center = center,
+                radius = r,
+                isUltimateActive = isUltimatePreview,
+                isCounterActive = false,
+                globalTime = globalTime,
+                allowDetailedFx = true
+            )
+
             withTransform({
                 translate(center.x, center.y)
             }) {
@@ -90,6 +101,12 @@ object AnimeBallRenderer {
                     isUlt = isUltimatePreview,
                     isSerious = false,
                     hitFlash = 0f
+                )
+                StandAndAbilityRenderer.drawAuthenticOutfitOverlay(
+                    scope = this,
+                    char = character,
+                    r = r,
+                    isUlt = isUltimatePreview
                 )
             }
 
@@ -243,7 +260,19 @@ object AnimeBallRenderer {
                 )
             }
 
-            // 4. Unified local transform with explicit pivot = Offset.Zero
+            // 4a. Stand Spirits & Ultimate Avatar Manifestations behind the sphere
+            StandAndAbilityRenderer.drawBehindSphereManifestations(
+                scope = this,
+                character = char,
+                center = center,
+                radius = r,
+                isUltimateActive = isUlt,
+                isCounterActive = ball.isCounterActive,
+                globalTime = globalTime,
+                allowDetailedFx = renderMode != RenderMode.PIXELIZED
+            )
+
+            // 4b. Unified local transform with explicit pivot = Offset.Zero
             val rotDeg = Math.toDegrees(ball.deformAngle.toDouble()).toFloat()
             val useElastic = physicsMesh == PhysicsMesh.DYNAMIC
             val sx = if (useElastic) ball.stretchFactor.coerceIn(0.84f, 1.18f) else 1f
@@ -271,6 +300,12 @@ object AnimeBallRenderer {
                     isSerious = ball.isSeriousActive,
                     hitFlash = ball.hitFlashTimer
                 )
+                StandAndAbilityRenderer.drawAuthenticOutfitOverlay(
+                    scope = this,
+                    char = char,
+                    r = r,
+                    isUlt = isUlt
+                )
             }
 
             // 5. Signature orbiting weapon (scales up dramatically during Ultimate!)
@@ -286,7 +321,8 @@ object AnimeBallRenderer {
                 globalTime = globalTime
             )
 
-            // 6. Status & Passive Barrier overlays
+            // 6. Status, Counter Barrier & Passive overlays
+            StandAndAbilityRenderer.drawActiveCounterOverlay(this, ball, center, r, globalTime)
             drawStatusOverlays(ball, center, r, globalTime)
         }
     }

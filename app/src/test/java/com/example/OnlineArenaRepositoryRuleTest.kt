@@ -166,7 +166,7 @@ class OnlineArenaRepositoryRuleTest : FirestoreEmulatorTestBase() {
         assertEquals("active", joinedRoom!!.status)
         assertEquals(guestUid, joinedRoom.guestUid)
 
-        // Guest sends combat update
+        // Guest sends combat update with counterSeq
         withTimeout(DEFAULT_TIMEOUT_MS) {
             repo.sendGuestCombatUpdate(
                 roomId = joinedRoom.roomId,
@@ -174,12 +174,28 @@ class OnlineArenaRepositoryRuleTest : FirestoreEmulatorTestBase() {
                 dirX = -0.5f,
                 dirY = 0.86f,
                 ultSeq = 1,
-                guestSyncHp = 355
+                guestSyncHp = 355,
+                counterSeq = 1
             )
         }
 
-        // Host sends combat update and finishes match
+        // Host sends combat update with counterSeq + syncStatePacked, then finishes match
         signInTestUser(HOST_EMAIL)
+        withTimeout(DEFAULT_TIMEOUT_MS) {
+            repo.sendHostCombatUpdate(
+                roomId = joinedRoom.roomId,
+                cmdSeq = 1,
+                dirX = 0.4f,
+                dirY = -0.9f,
+                ultSeq = 1,
+                hostSyncHp = 340,
+                guestSyncHp = 310,
+                status = "active",
+                winnerUid = "",
+                counterSeq = 1,
+                syncStatePacked = "0.52,0.74,0.34,-0.88,0.48,0.26,-0.34,0.88,340,310,45,30"
+            )
+        }
         withTimeout(DEFAULT_TIMEOUT_MS) {
             repo.sendHostCombatUpdate(
                 roomId = joinedRoom.roomId,
@@ -190,14 +206,15 @@ class OnlineArenaRepositoryRuleTest : FirestoreEmulatorTestBase() {
                 hostSyncHp = 320,
                 guestSyncHp = 0,
                 status = "finished",
-                winnerUid = hostUid
+                winnerUid = hostUid,
+                counterSeq = 1
             )
         }
         withTimeout(DEFAULT_TIMEOUT_MS) {
             repo.deleteRoomSafely(joinedRoom.roomId)
         }
 
-        // 3. Online Ranked Matchmaking Queue flow
+        // 3. Online Ranked Matchmaking Queue + Guest clean forfeit flow
         val hostQueue = withTimeout(DEFAULT_TIMEOUT_MS) {
             repo.findOrCreateRankedRoom(hostUid, hostProfile, CharacterUpgradeState())
         }
@@ -208,6 +225,11 @@ class OnlineArenaRepositoryRuleTest : FirestoreEmulatorTestBase() {
             repo.findOrCreateRankedRoom(guestUid, guestProfile, CharacterUpgradeState())
         }
         assertTrue(guestQueue is RankedQueueResult.JoinedExisting)
+        val rankedRoom = (guestQueue as RankedQueueResult.JoinedExisting).room
+
+        withTimeout(DEFAULT_TIMEOUT_MS) {
+            repo.sendGuestForfeit(rankedRoom.roomId, hostUid)
+        }
     }
 
     private companion object {

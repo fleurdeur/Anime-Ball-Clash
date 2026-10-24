@@ -1,5 +1,12 @@
 package com.example.ui.screens
 
+import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -7,6 +14,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -101,6 +109,11 @@ fun HomeHubScreen(
         CharacterRoster.getById(profile.selectedCharacterId)
     }
 
+    BackHandler(enabled = showSettingsDialog || showRenameDialog) {
+        if (showSettingsDialog) showSettingsDialog = false
+        else if (showRenameDialog) showRenameDialog = false
+    }
+
     val effHp = activeUpgrades.effectiveMaxHp(activeCharacter.maxHp)
     val effDmg = activeUpgrades.effectiveBaseDamage(activeCharacter.baseDamage)
     val effCd = activeUpgrades.effectiveUltimateCooldown(activeCharacter.ultimateCooldownSeconds)
@@ -115,20 +128,23 @@ fun HomeHubScreen(
             )
         }
     ) { innerPadding ->
-        Box(
+        BoxWithConstraints(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding),
             contentAlignment = Alignment.TopCenter
         ) {
+            val isCompactPhone = maxWidth < 360.dp || maxHeight < 660.dp
+            val showcaseAvatarSize = if (isCompactPhone) 108.dp else 134.dp
+
             Column(
                 modifier = Modifier
                     .widthIn(max = 560.dp)
                     .fillMaxSize()
                     .verticalScroll(rememberScrollState())
-                    .padding(horizontal = 16.dp, vertical = 12.dp)
+                    .padding(horizontal = if (isCompactPhone) 12.dp else 16.dp, vertical = 12.dp)
                     .testTag("home_hub_screen"),
-                verticalArrangement = Arrangement.spacedBy(14.dp)
+                verticalArrangement = Arrangement.spacedBy(if (isCompactPhone) 11.dp else 14.dp)
             ) {
                 // 1. Sleek Top Account & Theme Bar
                 Surface(
@@ -381,18 +397,27 @@ fun HomeHubScreen(
                                         )
                                     }
 
-                                    Canvas(
-                                        modifier = Modifier
-                                            .size(134.dp)
-                                            .clip(CircleShape)
-                                            .clickable { previewUltOnStage = !previewUltOnStage }
-                                    ) {
-                                        AnimeBallRenderer.drawPreviewAvatar(
-                                            scope = this,
-                                            character = activeCharacter,
-                                            weaponAngle = if (previewUltOnStage) 1.15f else 0.68f,
-                                            isUltimatePreview = previewUltOnStage
-                                        )
+                                    AnimatedContent(
+                                        targetState = activeCharacter,
+                                        transitionSpec = {
+                                            (fadeIn(tween(190)) + scaleIn(initialScale = 0.90f, animationSpec = tween(190)))
+                                                .togetherWith(fadeOut(tween(140)))
+                                        },
+                                        label = "HomeShowcaseAvatar"
+                                    ) { shownChar ->
+                                        Canvas(
+                                            modifier = Modifier
+                                                .size(showcaseAvatarSize)
+                                                .clip(CircleShape)
+                                                .clickable { previewUltOnStage = !previewUltOnStage }
+                                        ) {
+                                            AnimeBallRenderer.drawPreviewAvatar(
+                                                scope = this,
+                                                character = shownChar,
+                                                weaponAngle = if (previewUltOnStage) 1.15f else 0.68f,
+                                                isUltimatePreview = previewUltOnStage
+                                            )
+                                        }
                                     }
 
                                     IconButton(
@@ -423,6 +448,34 @@ fun HomeHubScreen(
                                     style = MaterialTheme.typography.bodyMedium,
                                     color = palette.stageMuted
                                 )
+                                Spacer(modifier = Modifier.height(5.dp))
+                                Surface(
+                                    color = palette.cardSurface.copy(alpha = 0.85f),
+                                    shape = RoundedCornerShape(50),
+                                    border = BorderStroke(1.dp, palette.border)
+                                ) {
+                                    Text(
+                                        text = "${activeCharacter.animeRace.simpleName} • ${activeCharacter.worldScaleTier.simpleName}",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = palette.blueAccent,
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp)
+                                    )
+                                }
+                                if (activeCharacter.hasStandSpirit) {
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    Surface(
+                                        color = palette.goldAccentSoft,
+                                        shape = RoundedCornerShape(50),
+                                        border = BorderStroke(1.dp, palette.goldAccent.copy(alpha = 0.45f))
+                                    ) {
+                                        Text(
+                                            text = "STAND: ${activeCharacter.joJoStandStyle.standName}",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = palette.goldAccent,
+                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp)
+                                        )
+                                    }
+                                }
                             }
                         }
 
@@ -469,7 +522,15 @@ fun HomeHubScreen(
                             badgeBg = palette.blueAccentSoft,
                             badgeFg = palette.blueAccent,
                             title = "${activeCharacter.passiveName} (${activeCharacter.passiveArchetype.shortTag})",
-                            desc = activeCharacter.passiveDescription
+                            desc = activeCharacter.simplePassiveSummary
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        TraitLine(
+                            badge = "AUTO COUNTER",
+                            badgeBg = palette.greenAccentSoft,
+                            badgeFg = palette.greenAccent,
+                            title = "${activeCharacter.counterArchetype.simpleName} (${activeCharacter.autoCounterPercent}% Chance)",
+                            desc = activeCharacter.simpleAutoCounterSummary
                         )
                         Spacer(modifier = Modifier.height(8.dp))
                         TraitLine(
@@ -477,7 +538,7 @@ fun HomeHubScreen(
                             badgeBg = palette.primaryAccentSoft,
                             badgeFg = palette.primaryAccent,
                             title = activeCharacter.ultimateName,
-                            desc = activeCharacter.ultimateDescription
+                            desc = activeCharacter.simpleUltimateSummary
                         )
                     }
                 }
@@ -605,9 +666,9 @@ fun HomeHubScreen(
 
                         val actionLabel = when (selectedMode) {
                             GameMode.PRACTICE_BOT -> "Play Now"
-                            GameMode.CUSTOM_MATCH -> "Open Custom Match"
-                            GameMode.MULTIPLAYER -> "Open LAN & Friend Lobby"
-                            GameMode.ONLINE_MATCH -> "Find Online Ranked Match"
+                            GameMode.CUSTOM_MATCH -> "Pick Any 2 Fighters"
+                            GameMode.MULTIPLAYER -> "Play With Friends"
+                            GameMode.ONLINE_MATCH -> "Find Online Match"
                         }
 
                         Button(

@@ -70,12 +70,15 @@ data class MatchRoomDoc(
     val hostDirX: Float = 0f,
     val hostDirY: Float = 0f,
     val hostUltSeq: Int = 0,
+    val hostCounterSeq: Int = 0,
     val hostSyncHp: Int = 360,
     val guestCmdSeq: Int = 0,
     val guestDirX: Float = 0f,
     val guestDirY: Float = 0f,
     val guestUltSeq: Int = 0,
+    val guestCounterSeq: Int = 0,
     val guestSyncHp: Int = 360,
+    val syncStatePacked: String = "",
     val winnerUid: String = ""
 )
 
@@ -456,23 +459,27 @@ class OnlineArenaRepository(
         hostSyncHp: Int,
         guestSyncHp: Int,
         status: String = "active",
-        winnerUid: String = ""
+        winnerUid: String = "",
+        counterSeq: Int = 0,
+        syncStatePacked: String = ""
     ) {
         val path = "match_rooms/$roomId"
         try {
-            db.collection("match_rooms").document(roomId).update(
-                mapOf(
-                    "status" to status,
-                    "hostCmdSeq" to cmdSeq.coerceIn(0, 1_000_000),
-                    "hostDirX" to dirX.coerceIn(-1.5f, 1.5f).toDouble(),
-                    "hostDirY" to dirY.coerceIn(-1.5f, 1.5f).toDouble(),
-                    "hostUltSeq" to ultSeq.coerceIn(0, 1_000_000),
-                    "hostSyncHp" to hostSyncHp.coerceIn(0, 2000),
-                    "guestSyncHp" to guestSyncHp.coerceIn(0, 2000),
-                    "winnerUid" to winnerUid.take(128),
-                    "updatedAt" to FieldValue.serverTimestamp()
-                )
-            ).await()
+            val payload = HashMap<String, Any>(12)
+            payload["status"] = status
+            payload["hostCmdSeq"] = cmdSeq.coerceIn(0, 1_000_000)
+            payload["hostDirX"] = dirX.coerceIn(-1.5f, 1.5f).toDouble()
+            payload["hostDirY"] = dirY.coerceIn(-1.5f, 1.5f).toDouble()
+            payload["hostUltSeq"] = ultSeq.coerceIn(0, 1_000_000)
+            payload["hostCounterSeq"] = counterSeq.coerceIn(0, 1_000_000)
+            payload["hostSyncHp"] = hostSyncHp.coerceIn(0, 2000)
+            payload["guestSyncHp"] = guestSyncHp.coerceIn(0, 2000)
+            if (syncStatePacked.isNotEmpty()) {
+                payload["syncStatePacked"] = syncStatePacked.take(240)
+            }
+            payload["winnerUid"] = winnerUid.take(128)
+            payload["updatedAt"] = FieldValue.serverTimestamp()
+            db.collection("match_rooms").document(roomId).update(payload).await()
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -486,28 +493,47 @@ class OnlineArenaRepository(
         dirX: Float,
         dirY: Float,
         ultSeq: Int,
-        guestSyncHp: Int,
+        guestSyncHp: Int? = null,
         status: String = "active",
-        winnerUid: String = ""
+        winnerUid: String = "",
+        counterSeq: Int = 0
     ) {
+        val path = "match_rooms/$roomId"
+        try {
+            val payload = HashMap<String, Any>(10)
+            payload["status"] = status
+            payload["guestCmdSeq"] = cmdSeq.coerceIn(0, 1_000_000)
+            payload["guestDirX"] = dirX.coerceIn(-1.5f, 1.5f).toDouble()
+            payload["guestDirY"] = dirY.coerceIn(-1.5f, 1.5f).toDouble()
+            payload["guestUltSeq"] = ultSeq.coerceIn(0, 1_000_000)
+            payload["guestCounterSeq"] = counterSeq.coerceIn(0, 1_000_000)
+            if (guestSyncHp != null) {
+                payload["guestSyncHp"] = guestSyncHp.coerceIn(0, 2000)
+            }
+            payload["winnerUid"] = winnerUid.take(128)
+            payload["updatedAt"] = FieldValue.serverTimestamp()
+            db.collection("match_rooms").document(roomId).update(payload).await()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            FirestoreErrorHandler.logAndRethrow(e, OperationType.UPDATE, path)
+        }
+    }
+
+    suspend fun sendGuestForfeit(roomId: String, hostUid: String) {
         val path = "match_rooms/$roomId"
         try {
             db.collection("match_rooms").document(roomId).update(
                 mapOf(
-                    "status" to status,
-                    "guestCmdSeq" to cmdSeq.coerceIn(0, 1_000_000),
-                    "guestDirX" to dirX.coerceIn(-1.5f, 1.5f).toDouble(),
-                    "guestDirY" to dirY.coerceIn(-1.5f, 1.5f).toDouble(),
-                    "guestUltSeq" to ultSeq.coerceIn(0, 1_000_000),
-                    "guestSyncHp" to guestSyncHp.coerceIn(0, 2000),
-                    "winnerUid" to winnerUid.take(128),
+                    "status" to "finished",
+                    "winnerUid" to hostUid.take(128),
                     "updatedAt" to FieldValue.serverTimestamp()
                 )
             ).await()
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            FirestoreErrorHandler.logAndRethrow(e, OperationType.UPDATE, path)
+            FirestoreErrorHandler.logListenerError(e, OperationType.UPDATE, path)
         }
     }
 
@@ -553,12 +579,15 @@ class OnlineArenaRepository(
         "hostDirX" to 0.0,
         "hostDirY" to 0.0,
         "hostUltSeq" to 0,
+        "hostCounterSeq" to 0,
         "hostSyncHp" to hostMaxHp,
         "guestCmdSeq" to 0,
         "guestDirX" to 0.0,
         "guestDirY" to 0.0,
         "guestUltSeq" to 0,
+        "guestCounterSeq" to 0,
         "guestSyncHp" to 360,
+        "syncStatePacked" to "",
         "winnerUid" to "",
         "createdAt" to FieldValue.serverTimestamp(),
         "updatedAt" to FieldValue.serverTimestamp()
@@ -627,12 +656,15 @@ class OnlineArenaRepository(
             hostDirX = (doc.getDouble("hostDirX") ?: 0.0).toFloat(),
             hostDirY = (doc.getDouble("hostDirY") ?: 0.0).toFloat(),
             hostUltSeq = (doc.getLong("hostUltSeq") ?: 0L).toInt(),
+            hostCounterSeq = (doc.getLong("hostCounterSeq") ?: 0L).toInt(),
             hostSyncHp = (doc.getLong("hostSyncHp") ?: 360L).toInt(),
             guestCmdSeq = (doc.getLong("guestCmdSeq") ?: 0L).toInt(),
             guestDirX = (doc.getDouble("guestDirX") ?: 0.0).toFloat(),
             guestDirY = (doc.getDouble("guestDirY") ?: 0.0).toFloat(),
             guestUltSeq = (doc.getLong("guestUltSeq") ?: 0L).toInt(),
+            guestCounterSeq = (doc.getLong("guestCounterSeq") ?: 0L).toInt(),
             guestSyncHp = (doc.getLong("guestSyncHp") ?: 360L).toInt(),
+            syncStatePacked = doc.getString("syncStatePacked") ?: "",
             winnerUid = doc.getString("winnerUid") ?: ""
         )
     }

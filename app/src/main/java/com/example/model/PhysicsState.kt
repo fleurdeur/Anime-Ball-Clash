@@ -103,7 +103,11 @@ data class CombatBall(
     var totalWallBounces: Int = 0,
     var isShieldActive: Boolean = false,
     var isSeriousActive: Boolean = false,
+    var counterActiveTimer: Float = 0f,
+    var counterCooldownRemaining: Float = 0f,
     var wallBounceCombo: Int = 0,
+    var matchupBalance: LoreMatchupBalance = LoreMatchupBalance(),
+    var ultVolleyTimer: Float = 0f,
     val trailPositions: ArrayDeque<Vector2> = ArrayDeque(12)
 ) {
     init {
@@ -125,6 +129,24 @@ data class CombatBall(
     val canActivateUltimate: Boolean
         get() = !isUltimateActive && ultimateCooldownRemaining <= 0f && ultimateGauge >= 100f
 
+    val counterDurationSec: Float get() = 0.85f
+    val counterCooldownSec: Float
+        get() = (2.8f - upgrades.cooldownLevel * 0.12f).coerceAtLeast(1.75f)
+    val isCounterActive: Boolean get() = counterActiveTimer > 0.01f
+    val isCounterOnCooldown: Boolean get() = counterCooldownRemaining > 0.01f
+    val canActivateCounter: Boolean
+        get() = !isDead && !isCounterActive && !isCounterOnCooldown
+
+    val effectiveAutoCounterChance: Float
+        get() = (
+            character.baseAutoCounterChance +
+                upgrades.cooldownLevel * 0.008f +
+                matchupBalance.autoCounterBonusChance
+            ).coerceIn(0.18f, 0.48f)
+
+    val effectiveAutoCounterPercent: Int
+        get() = (effectiveAutoCounterChance * 100f + 0.5f).toInt()
+
     val effectiveBaseDamage: Int
         get() = upgrades.effectiveBaseDamage(character.baseDamage)
 
@@ -134,8 +156,16 @@ data class CombatBall(
     val effectiveUltCooldownSec: Float
         get() = upgrades.effectiveUltimateCooldown(character.ultimateCooldownSeconds)
 
+    /**
+     * Multi-Dash in Ultimate Form:
+     * Normal dash cooldown is ~3.0s; during Ultimate form it drops to 0.32s for rapid multi-dashes!
+     */
     val effectiveRedirectCooldownSec: Float
-        get() = (3.0f - upgrades.redirectCooldownReduction()).coerceAtLeast(1.65f)
+        get() = if (isUltimateActive) {
+            0.32f
+        } else {
+            (3.0f - upgrades.redirectCooldownReduction()).coerceAtLeast(1.65f)
+        }
 
     val targetWeaponScale: Float
         get() = computeUltimateWeaponScale(character, isUltimateActive)
@@ -147,7 +177,7 @@ data class CombatBall(
             character.passiveArchetype == PassiveArchetype.ADAPTIVE_EVOLUTION -> 1.14f
             currentHp < maxHp * 0.45f && character.alignment == CharacterAlignment.PROTAGONIST -> 1.12f
             else -> 1.0f
-        }
+        } * matchupBalance.ultChargeMultiplier
         ultimateGauge = (ultimateGauge + amount * gainMult).coerceIn(0f, 100f)
     }
 
@@ -176,6 +206,40 @@ data class CombatBall(
             }
         }
     }
+}
+
+data class AbilityProjectile(
+    val id: Long,
+    val ownerId: String,
+    val style: CanonProjectileStyle,
+    var x: Float,
+    var y: Float,
+    var vx: Float,
+    var vy: Float,
+    var angle: Float,
+    val speed: Float,
+    val radius: Float,
+    val damage: Float,
+    val primaryColor: Color,
+    val secondaryColor: Color,
+    var hoverTimer: Float = 0f,
+    val anchorOffsetX: Float = 0f,
+    val anchorOffsetY: Float = 0f,
+    var life: Float = 1.6f,
+    val maxLife: Float = 1.6f,
+    var fadeOutTimer: Float = -1f,
+    val maxFadeOut: Float = 0.34f,
+    var hasHit: Boolean = false,
+    val piercesThrough: Boolean = false,
+    val teleportsOwnerBehindOnHit: Boolean = false
+) {
+    val isFadingOut: Boolean get() = fadeOutTimer >= 0f
+    val currentAlpha: Float
+        get() = if (fadeOutTimer >= 0f) {
+            (fadeOutTimer / maxFadeOut.coerceAtLeast(0.05f)).coerceIn(0f, 1f)
+        } else {
+            1f
+        }
 }
 
 data class Particle(

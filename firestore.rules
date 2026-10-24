@@ -79,7 +79,7 @@ service cloud.firestore {
     }
 
     function isValidMatchRoom(data) {
-      let keys = [
+      let requiredKeys = [
         'roomCode', 'mode', 'status',
         'hostUid', 'hostName', 'hostCharId', 'hostRating', 'hostHpLvl', 'hostPwrLvl', 'hostCdLvl',
         'guestUid', 'guestName', 'guestCharId', 'guestRating', 'guestHpLvl', 'guestPwrLvl', 'guestCdLvl',
@@ -88,8 +88,18 @@ service cloud.firestore {
         'guestCmdSeq', 'guestDirX', 'guestDirY', 'guestUltSeq', 'guestSyncHp',
         'winnerUid', 'createdAt', 'updatedAt'
       ];
-      return data.keys().hasAll(keys)
-        && data.keys().hasOnly(keys)
+      let allowedKeys = [
+        'roomCode', 'mode', 'status',
+        'hostUid', 'hostName', 'hostCharId', 'hostRating', 'hostHpLvl', 'hostPwrLvl', 'hostCdLvl',
+        'guestUid', 'guestName', 'guestCharId', 'guestRating', 'guestHpLvl', 'guestPwrLvl', 'guestCdLvl',
+        'seed',
+        'hostCmdSeq', 'hostDirX', 'hostDirY', 'hostUltSeq', 'hostCounterSeq', 'hostSyncHp',
+        'guestCmdSeq', 'guestDirX', 'guestDirY', 'guestUltSeq', 'guestCounterSeq', 'guestSyncHp',
+        'syncStatePacked',
+        'winnerUid', 'createdAt', 'updatedAt'
+      ];
+      return data.keys().hasAll(requiredKeys)
+        && data.keys().hasOnly(allowedKeys)
         && data.roomCode is string && data.roomCode.size() >= 4 && data.roomCode.size() <= 12
         && data.mode is string && data.mode in ['ranked', 'friend']
         && data.status is string && data.status in ['waiting', 'active', 'finished']
@@ -112,12 +122,15 @@ service cloud.firestore {
         && data.hostDirX is number && data.hostDirX >= -2 && data.hostDirX <= 2
         && data.hostDirY is number && data.hostDirY >= -2 && data.hostDirY <= 2
         && data.hostUltSeq is int && data.hostUltSeq >= 0 && data.hostUltSeq <= 1000000
+        && (!('hostCounterSeq' in data) || (data.hostCounterSeq is int && data.hostCounterSeq >= 0 && data.hostCounterSeq <= 1000000))
         && data.hostSyncHp is int && data.hostSyncHp >= 0 && data.hostSyncHp <= 2000
         && data.guestCmdSeq is int && data.guestCmdSeq >= 0 && data.guestCmdSeq <= 1000000
         && data.guestDirX is number && data.guestDirX >= -2 && data.guestDirX <= 2
         && data.guestDirY is number && data.guestDirY >= -2 && data.guestDirY <= 2
         && data.guestUltSeq is int && data.guestUltSeq >= 0 && data.guestUltSeq <= 1000000
+        && (!('guestCounterSeq' in data) || (data.guestCounterSeq is int && data.guestCounterSeq >= 0 && data.guestCounterSeq <= 1000000))
         && data.guestSyncHp is int && data.guestSyncHp >= 0 && data.guestSyncHp <= 2000
+        && (!('syncStatePacked' in data) || (data.syncStatePacked is string && data.syncStatePacked.size() <= 240))
         && data.winnerUid is string && data.winnerUid.size() <= 128
         && data.createdAt is timestamp
         && data.updatedAt is timestamp;
@@ -171,6 +184,63 @@ service cloud.firestore {
       allow delete: if isOwner(userId) && isValidId(userId);
     }
 
+    function canUpdateMatchRoom(inc, cur) {
+      let changed = inc.diff(cur).affectedKeys();
+      let uid = request.auth.uid;
+      return cur.status != 'finished'
+        && inc.createdAt == cur.createdAt
+        && inc.hostUid == cur.hostUid
+        && inc.mode == cur.mode
+        && inc.roomCode == cur.roomCode
+        && inc.seed == cur.seed
+        && inc.updatedAt <= request.time
+        && isValidMatchRoom(inc)
+        && (
+          // Action A: Guest joins an open waiting room
+          (
+            cur.status == 'waiting'
+            && cur.guestUid == ''
+            && uid != cur.hostUid
+            && inc.guestUid == uid
+            && inc.status == 'active'
+            && changed.hasOnly([
+              'status', 'guestUid', 'guestName', 'guestCharId', 'guestRating',
+              'guestHpLvl', 'guestPwrLvl', 'guestCdLvl', 'guestSyncHp', 'updatedAt'
+            ])
+          )
+          ||
+          // Action B: Host sends combat impulse / Ultimate / Counter / authoritative state or finishes match
+          (
+            cur.status == 'active'
+            && uid == cur.hostUid
+            && inc.guestUid == cur.guestUid
+            && (
+              (inc.status == 'active' && inc.winnerUid == '') ||
+              (inc.status == 'finished' && (inc.winnerUid == cur.hostUid || inc.winnerUid == cur.guestUid))
+            )
+            && changed.hasOnly([
+              'status', 'hostCmdSeq', 'hostDirX', 'hostDirY', 'hostUltSeq', 'hostCounterSeq',
+              'hostSyncHp', 'guestSyncHp', 'syncStatePacked', 'winnerUid', 'updatedAt'
+            ])
+          )
+          ||
+          // Action C: Guest sends combat impulse / Ultimate / Counter, or forfeits cleanly to Host
+          (
+            cur.status == 'active'
+            && uid == cur.guestUid
+            && inc.guestUid == cur.guestUid
+            && (
+              (inc.status == 'active' && inc.winnerUid == '') ||
+              (inc.status == 'finished' && inc.winnerUid == cur.hostUid)
+            )
+            && changed.hasOnly([
+              'status', 'guestCmdSeq', 'guestDirX', 'guestDirY', 'guestUltSeq', 'guestCounterSeq',
+              'guestSyncHp', 'winnerUid', 'updatedAt'
+            ])
+          )
+        );
+    }
+
     // ===============================================================
     // 3. Real-Time 1v1 Match Rooms (/match_rooms/{roomId})
     // ===============================================================
@@ -194,52 +264,7 @@ service cloud.firestore {
 
       allow update: if isSignedIn()
         && isValidId(roomId)
-        && isValidMatchRoom(incoming())
-        && existing().status != 'finished'
-        && incoming().createdAt == existing().createdAt
-        && incoming().hostUid == existing().hostUid
-        && incoming().mode == existing().mode
-        && incoming().roomCode == existing().roomCode
-        && incoming().seed == existing().seed
-        && incoming().updatedAt <= request.time
-        && (
-          // Action A: Guest joins an open waiting room
-          (
-            existing().status == 'waiting'
-            && existing().guestUid == ''
-            && request.auth.uid != existing().hostUid
-            && incoming().guestUid == request.auth.uid
-            && incoming().status == 'active'
-            && incoming().diff(existing()).affectedKeys().hasOnly([
-              'status', 'guestUid', 'guestName', 'guestCharId', 'guestRating',
-              'guestHpLvl', 'guestPwrLvl', 'guestCdLvl', 'guestSyncHp', 'updatedAt'
-            ])
-          )
-          ||
-          // Action B: Host sends combat impulse / Ultimate / authoritative HP or finishes match
-          (
-            existing().status == 'active'
-            && request.auth.uid == existing().hostUid
-            && incoming().guestUid == existing().guestUid
-            && (incoming().status == 'active' || incoming().status == 'finished')
-            && incoming().diff(existing()).affectedKeys().hasOnly([
-              'status', 'hostCmdSeq', 'hostDirX', 'hostDirY', 'hostUltSeq',
-              'hostSyncHp', 'guestSyncHp', 'winnerUid', 'updatedAt'
-            ])
-          )
-          ||
-          // Action C: Guest sends combat impulse / Ultimate / HP checkpoint or finishes match
-          (
-            existing().status == 'active'
-            && request.auth.uid == existing().guestUid
-            && incoming().guestUid == existing().guestUid
-            && (incoming().status == 'active' || incoming().status == 'finished')
-            && incoming().diff(existing()).affectedKeys().hasOnly([
-              'status', 'guestCmdSeq', 'guestDirX', 'guestDirY', 'guestUltSeq',
-              'guestSyncHp', 'winnerUid', 'updatedAt'
-            ])
-          )
-        );
+        && canUpdateMatchRoom(request.resource.data, resource.data);
 
       allow delete: if isSignedIn()
         && isValidId(roomId)

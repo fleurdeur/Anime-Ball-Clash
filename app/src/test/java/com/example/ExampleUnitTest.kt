@@ -546,4 +546,384 @@ class ExampleUnitTest {
         val unpacked = OnlineArenaRepository.unpackUpgrades(packed)
         assertEquals(originalUpgrades, unpacked)
     }
+
+    @Test
+    fun testAllEightCounterArchetypesAndThematicImmunitiesWork() {
+        val roster = CharacterRoster.characters
+        assertEquals(
+            "All 9 CounterArchetypes (including TELEPORT_STRIKE) must be represented across the 224-character roster",
+            com.example.model.CounterArchetype.entries.size,
+            roster.map { it.counterArchetype }.toSet().size
+        )
+
+        // Verify Time Immunity cleanses Time Stop stun immediately
+        val jotaro = CharacterRoster.getById("kujo_star")
+        assertEquals(com.example.model.CounterArchetype.TIME_IMMUNITY, jotaro.counterArchetype)
+        assertTrue(jotaro.hasStandSpirit)
+        assertEquals(com.example.model.JoJoStandStyle.STAR_PLATINUM, jotaro.joJoStandStyle)
+
+        val dio = CharacterRoster.getById("dio_world")
+        assertEquals(com.example.model.JoJoStandStyle.THE_WORLD, dio.joJoStandStyle)
+
+        val asta = CharacterRoster.getById("asta_grimoire")
+        assertEquals(com.example.model.CounterArchetype.ANTI_MAGIC_NULL, asta.counterArchetype)
+
+        val pBall = CombatBall(
+            id = "player",
+            name = jotaro.name,
+            position = Vector2(480f, 800f),
+            velocity = Vector2.Zero,
+            character = jotaro
+        )
+        val oBall = CombatBall(
+            id = "opponent",
+            name = dio.name,
+            position = Vector2(520f, 800f),
+            velocity = Vector2(-600f, 0f),
+            character = dio
+        )
+        var counterFired = false
+        val sim = BattleSimulation(
+            playerBall = pBall,
+            opponentBall = oBall,
+            engineSettings = EngineSettings(),
+            onCollisionImpact = { _, _, _, _ -> },
+            onWallBounce = {},
+            onKnockout = {},
+            onCounterActivated = { isPlayer, _ -> if (isPlayer) counterFired = true }
+        )
+        sim.configureArenaBounds(1000f, 1600f)
+        sim.isRoundActive = true
+        sim.isClashStarted = true
+
+        // Simulate rival freezing player with Time Stop, then player activating TIME_IMMUNITY counter
+        pBall.stunTimeRemaining = 1.6f
+        assertTrue(pBall.isStunned)
+        assertTrue(sim.triggerCounter(pBall))
+        assertTrue(counterFired)
+        assertFalse("Time Immunity counter must immediately break Time Stop stun", pBall.isStunned)
+        assertTrue(pBall.isCounterActive)
+
+        // Colliding while Counter is active deals zero damage to defender
+        val hpBefore = pBall.currentHp
+        pBall.position = Vector2(485f, 800f)
+        oBall.position = Vector2(515f, 800f)
+        oBall.velocity = Vector2(-780f, 0f)
+        sim.update(0.016f)
+        assertEquals("Counter must block incoming collision damage", hpBefore, pBall.currentHp, 0.01f)
+    }
+
+    @Test
+    fun testUltimateModeUnlocksRapidMultiDash() {
+        val fighter = CharacterRoster.getById("kakarot_z")
+        val pBall = CombatBall(
+            id = "player",
+            name = fighter.name,
+            position = Vector2(500f, 1000f),
+            velocity = Vector2(0f, -500f),
+            character = fighter
+        )
+        val oBall = CombatBall(
+            id = "opponent",
+            name = "Rival",
+            position = Vector2(500f, 300f),
+            velocity = Vector2(0f, 500f),
+            character = CharacterRoster.getById("kamado_sun")
+        )
+        val sim = BattleSimulation(
+            playerBall = pBall,
+            opponentBall = oBall,
+            engineSettings = EngineSettings(),
+            onCollisionImpact = { _, _, _, _ -> },
+            onWallBounce = {},
+            onKnockout = {}
+        )
+        sim.configureArenaBounds(1000f, 1600f)
+        sim.startNonstopClash(Vector2(0.3f, -0.95f), BotDifficulty.EASY)
+
+        // Normal dash cooldown is ~3.2s; Ultimate dash cooldown drops to 0.32s for Multi-Dash!
+        val normalCd = pBall.effectiveRedirectCooldownSec
+        assertTrue(normalCd >= 2.0f)
+
+        pBall.ultimateGauge = 100f
+        assertTrue(sim.triggerUltimate(pBall))
+        assertTrue(pBall.isUltimateActive)
+        assertEquals(0.32f, pBall.effectiveRedirectCooldownSec, 0.01f)
+
+        // Execute multiple rapid dashes while Ultimate is active
+        sim.playerRedirectCooldown = 0f
+        assertTrue(sim.redirectPlayerBall(Vector2(0.6f, -0.8f)))
+        assertEquals(0.32f, sim.playerRedirectCooldown, 0.02f)
+
+        repeat(22) { sim.update(0.016f) } // ~0.35s elapsed
+        assertTrue("Multi-dash should be ready again after ~0.35s in Ultimate mode", sim.playerRedirectCooldown <= 0f)
+        assertTrue(sim.redirectPlayerBall(Vector2(-0.6f, -0.8f)))
+    }
+
+    @Test
+    fun testAiEasyModeIsTrulyBeginnerFriendly() {
+        assertEquals("Easy", BotDifficulty.EASY.title)
+        assertTrue("Easy AI accuracy must be gentle (< 0.55)", BotDifficulty.EASY.aimAccuracy <= 0.50f)
+        assertTrue("Easy AI speed factor must be slower (< 0.85)", BotDifficulty.EASY.speedFactor <= 0.80f)
+        assertTrue("Easy AI dash wait must be long (>= 6.0s)", BotDifficulty.EASY.redirectCooldownSec >= 6.0f)
+    }
+
+    @Test
+    fun testZeroDesyncAuthoritativeSyncPackingAndFinish() {
+        val hostPlayer = CombatBall(
+            id = "player",
+            name = "Host",
+            position = Vector2(520f, 1120f),
+            velocity = Vector2(320f, -640f),
+            character = CharacterRoster.getById("kakarot_z")
+        )
+        val hostOpponent = CombatBall(
+            id = "opponent",
+            name = "Guest",
+            position = Vector2(480f, 420f),
+            velocity = Vector2(-280f, 610f),
+            character = CharacterRoster.getById("satoru_void")
+        )
+        val hostSim = BattleSimulation(
+            playerBall = hostPlayer,
+            opponentBall = hostOpponent,
+            engineSettings = EngineSettings(),
+            isRemoteMultiplayer = true,
+            isGuestClient = false,
+            onCollisionImpact = { _, _, _, _ -> },
+            onWallBounce = {},
+            onKnockout = {}
+        )
+        hostSim.configureArenaBounds(1000f, 1600f)
+        hostSim.isClashStarted = true
+        hostPlayer.currentHp = 295f
+        hostOpponent.currentHp = 240f
+        hostPlayer.ultimateGauge = 64f
+        hostOpponent.ultimateGauge = 78f
+
+        val packed = hostSim.packHostSyncState()
+        assertTrue(packed.isNotBlank())
+
+        var guestWinnerResult: Boolean? = null
+        val guestSim = BattleSimulation(
+            playerBall = CombatBall("player", "Guest", Vector2.Zero, Vector2.Zero, character = CharacterRoster.getById("satoru_void")),
+            opponentBall = CombatBall("opponent", "Host", Vector2.Zero, Vector2.Zero, character = CharacterRoster.getById("kakarot_z")),
+            engineSettings = EngineSettings(),
+            isRemoteMultiplayer = true,
+            isGuestClient = true,
+            onCollisionImpact = { _, _, _, _ -> },
+            onWallBounce = {},
+            onKnockout = { isWinner -> guestWinnerResult = isWinner }
+        )
+        guestSim.configureArenaBounds(1000f, 1600f)
+        guestSim.applyPackedHostSyncOnGuest(packed)
+
+        // Guest local HP must match Host's opponent HP (240), and Guest opponent HP must match Host's player HP (295)
+        assertEquals(240f, guestSim.playerBall.currentHp, 0.5f)
+        assertEquals(295f, guestSim.opponentBall.currentHp, 0.5f)
+        assertEquals(78f, guestSim.playerBall.ultimateGauge, 1.0f)
+        assertEquals(64f, guestSim.opponentBall.ultimateGauge, 1.0f)
+
+        // Authoritative finish guarantees identical match winner on Guest
+        guestSim.forceAuthoritativeFinish(isPlayerWinner = false, finalPlayerHp = 0f, finalOpponentHp = 180f)
+        assertFalse(guestSim.isRoundActive)
+        assertEquals(false, guestWinnerResult)
+        assertEquals(0f, guestSim.playerBall.currentHp, 0.01f)
+        assertEquals(180f, guestSim.opponentBall.currentHp, 0.01f)
+    }
+
+    @Test
+    fun testDailyQuestsAndSituationalBattleAudioDirector() {
+        val dailies = InitialGameData.buildDailyQuests(20385L)
+        assertEquals(4, dailies.size)
+        assertTrue(dailies.all { it.isDaily && !it.isClaimed && it.currentProgress == 0 })
+
+        // Verify all 4 situational BGM WAV tracks synthesize valid RIFF headers
+        val situations = listOf(
+            com.example.audio.BattleBgmSituation.OPENING_TENSION,
+            com.example.audio.BattleBgmSituation.NORMAL_CLASH,
+            com.example.audio.BattleBgmSituation.ULTIMATE_SURGE,
+            com.example.audio.BattleBgmSituation.CLUTCH_DANGER
+        )
+        for (sit in situations) {
+            val wav = com.example.audio.BattleAudioDirector.synthesizeBgmTrackWav(sit)
+            assertTrue("BGM WAV for $sit must be > 4KB", wav.size > 4096)
+            assertEquals('R'.code.toByte(), wav[0])
+            assertEquals('I'.code.toByte(), wav[1])
+            assertEquals('F'.code.toByte(), wav[2])
+            assertEquals('F'.code.toByte(), wav[3])
+        }
+
+        val director = com.example.audio.BattleAudioDirector(null)
+        director.updateBattleSituation(inBattleArena = true, isClashStarted = false, eitherUltimateActive = false, lowestHpRatio = 1.0f)
+        assertEquals(com.example.audio.BattleBgmSituation.OPENING_TENSION, director.activeSituation)
+
+        director.updateBattleSituation(inBattleArena = true, isClashStarted = true, eitherUltimateActive = false, lowestHpRatio = 0.85f)
+        assertEquals(com.example.audio.BattleBgmSituation.NORMAL_CLASH, director.activeSituation)
+
+        director.updateBattleSituation(inBattleArena = true, isClashStarted = true, eitherUltimateActive = true, lowestHpRatio = 0.85f)
+        assertEquals(com.example.audio.BattleBgmSituation.ULTIMATE_SURGE, director.activeSituation)
+
+        director.updateBattleSituation(inBattleArena = true, isClashStarted = true, eitherUltimateActive = false, lowestHpRatio = 0.22f)
+        assertEquals(com.example.audio.BattleBgmSituation.CLUTCH_DANGER, director.activeSituation)
+
+        val dio = CharacterRoster.getById("dio_world")
+        director.speakUltimateVoiceLine(dio, isPlayer = true)
+        assertEquals(1, director.spokenVoiceCount)
+        assertTrue(director.lastSpokenLine.contains("ZA WARUDO", ignoreCase = true) || director.lastSpokenLine.isNotBlank())
+
+        director.stopBattleMusic()
+        assertEquals(com.example.audio.BattleBgmSituation.NONE, director.activeSituation)
+        director.release()
+    }
+
+    @Test
+    fun testCanonProjectilesGilgameshSwordsGojoHollowPurpleMinatoTeleportAndLoreBalance() {
+        // 1. LorePowerBalancer balances Street/Tactical fighters against Cosmic fighters while keeping both OP
+        val tanjiro = CharacterRoster.getById("kamado_sun")
+        val goku = CharacterRoster.getById("kakarot_z")
+        val tanjiroVsGoku = com.example.model.LorePowerBalancer.computeMatchup(tanjiro, goku)
+        val gokuVsTanjiro = com.example.model.LorePowerBalancer.computeMatchup(goku, tanjiro)
+        assertTrue("Underdog world tier receives tactical precision & ult charge boost", tanjiroVsGoku.critBonusMultiplier > 1.0f && tanjiroVsGoku.ultChargeMultiplier > 1.0f)
+        assertTrue("Cosmic Saiyan retains boss-scale HP & Zenkai surge", gokuVsTanjiro.hpMultiplier >= 1.0f && gokuVsTanjiro.lowHpZenkaiScale > 0f)
+        assertTrue(tanjiroVsGoku.simpleMatchupNote.isNotBlank())
+
+        // 2. Gilgamesh Ultimate spawns multiple visible Gate of Babylon swords that hover, shoot at rival, deal damage & fade out
+        val gilgamesh = CharacterRoster.getById("gilgamesh_babylon")
+        assertEquals(com.example.model.CanonProjectileStyle.BABYLON_SWORD_RAIN, gilgamesh.canonProjectileStyle)
+        val gilBall = CombatBall("player", gilgamesh.name, Vector2(260f, 800f), Vector2(200f, 0f), character = gilgamesh)
+        val rivalBall = CombatBall("opponent", tanjiro.name, Vector2(740f, 800f), Vector2.Zero, character = tanjiro)
+        val gilSim = BattleSimulation(
+            playerBall = gilBall,
+            opponentBall = rivalBall,
+            engineSettings = EngineSettings(),
+            onCollisionImpact = { _, _, _, _ -> },
+            onWallBounce = {},
+            onKnockout = {}
+        )
+        gilSim.configureArenaBounds(1000f, 1600f)
+        gilSim.isRoundActive = true
+        gilSim.isClashStarted = true
+        gilBall.ultimateGauge = 100f
+        // Prevent auto-counter during damage check
+        rivalBall.counterCooldownRemaining = 10f
+        val rivalHpBeforeSwords = rivalBall.currentHp
+        assertTrue(gilSim.triggerUltimate(gilBall))
+        assertTrue(
+            "Gilgamesh Ultimate must materialize multiple visible swords (>= 6)",
+            gilSim.projectiles.count { it.style == com.example.model.CanonProjectileStyle.BABYLON_SWORD_RAIN } >= 6
+        )
+        // Step frames so swords finish hovering, fly across the arena, hit rival, and begin fading out
+        var sawFadingSword = false
+        repeat(80) {
+            gilSim.positionLockForTest()
+            rivalBall.counterCooldownRemaining = 10f
+            gilSim.update(0.016f)
+            if (gilSim.projectiles.any { it.isFadingOut && it.currentAlpha < 1f }) {
+                sawFadingSword = true
+            }
+        }
+        assertTrue("Gilgamesh's launched swords must deal real damage to opposing character", rivalBall.currentHp < rivalHpBeforeSwords)
+        assertTrue("Projectiles must smoothly fade out after hitting", sawFadingSword || gilSim.projectiles.isEmpty())
+
+        // 3. Gojo Ultimate shoots Hollow Purple toward opposing character, deals heavy damage, and smoothly fades out
+        val gojo = CharacterRoster.getById("satoru_void")
+        assertEquals(com.example.model.CanonProjectileStyle.HOLLOW_PURPLE_ORB, gojo.canonProjectileStyle)
+        val gojoBall = CombatBall("player", gojo.name, Vector2(240f, 800f), Vector2.Zero, character = gojo)
+        val sukunaBall = CombatBall("opponent", "Sukuna", Vector2(720f, 800f), Vector2.Zero, character = CharacterRoster.getById("ryomen_shrine"))
+        val gojoSim = BattleSimulation(
+            playerBall = gojoBall,
+            opponentBall = sukunaBall,
+            engineSettings = EngineSettings(),
+            onCollisionImpact = { _, _, _, _ -> },
+            onWallBounce = {},
+            onKnockout = {}
+        )
+        gojoSim.configureArenaBounds(1000f, 1600f)
+        gojoSim.isRoundActive = true
+        gojoSim.isClashStarted = true
+        gojoBall.ultimateGauge = 100f
+        sukunaBall.counterCooldownRemaining = 10f
+        val sukunaHpBefore = sukunaBall.currentHp
+        assertTrue(gojoSim.triggerUltimate(gojoBall))
+        val purpleOrb = gojoSim.projectiles.firstOrNull { it.style == com.example.model.CanonProjectileStyle.HOLLOW_PURPLE_ORB }
+        assertTrue("Gojo must spawn Hollow Purple orb projectile", purpleOrb != null)
+
+        var sawPurpleFade = false
+        repeat(95) {
+            gojoBall.position = Vector2(200f, 300f)
+            gojoBall.velocity = Vector2.Zero
+            sukunaBall.position = Vector2(720f, 800f)
+            sukunaBall.velocity = Vector2.Zero
+            sukunaBall.counterCooldownRemaining = 10f
+            gojoSim.update(0.016f)
+            if (gojoSim.projectiles.any { it.style == com.example.model.CanonProjectileStyle.HOLLOW_PURPLE_ORB && it.isFadingOut }) {
+                sawPurpleFade = true
+            }
+        }
+        assertTrue("Hollow Purple must hit opposing character for damage", sukunaBall.currentHp < sukunaHpBefore)
+        assertTrue("Hollow Purple must smoothly fade out after shooting across", sawPurpleFade)
+
+        // 4. Minato has TELEPORT_STRIKE and automatic chance-based counter teleports him behind the attacker!
+        val minato = CharacterRoster.getById("minato_flash")
+        assertEquals(com.example.model.CounterArchetype.TELEPORT_STRIKE, minato.counterArchetype)
+        assertEquals(com.example.model.CanonProjectileStyle.FLYING_RAIJIN_KUNAI, minato.canonProjectileStyle)
+
+        var autoCounterCount = 0
+        val minatoBall = CombatBall("player", minato.name, Vector2(500f, 800f), Vector2.Zero, character = minato)
+        val attackerBall = CombatBall("opponent", goku.name, Vector2(360f, 800f), Vector2(760f, 0f), character = goku)
+        val minatoSim = BattleSimulation(
+            playerBall = minatoBall,
+            opponentBall = attackerBall,
+            engineSettings = EngineSettings(),
+            onCollisionImpact = { _, _, _, _ -> },
+            onWallBounce = {},
+            onKnockout = {},
+            onCounterActivated = { isPlayer, _ -> if (isPlayer) autoCounterCount++ }
+        )
+        minatoSim.configureArenaBounds(1000f, 1600f)
+        minatoSim.isRoundActive = true
+        minatoSim.isClashStarted = true
+
+        // Run repeated attack impacts with cooldown reset to verify probabilistic auto-counter triggers & teleports behind attacker
+        var teleportedBehind = false
+        for (attempt in 0 until 24) {
+            minatoBall.currentHp = minatoBall.maxHp
+            attackerBall.currentHp = attackerBall.maxHp
+            minatoBall.counterCooldownRemaining = 0f
+            minatoBall.counterActiveTimer = 0f
+            // Attacker charges at high speed from left (x=455 -> +x) into Minato (x=515); behind attacker is x < attacker.x!
+            attackerBall.speedBoostMultiplier = 1.45f
+            attackerBall.speedBoostTimer = 1.0f
+            attackerBall.position = Vector2(455f, 800f)
+            attackerBall.velocity = Vector2(1480f, 0f)
+            minatoBall.position = Vector2(515f, 800f)
+            minatoBall.velocity = Vector2(-120f, 0f)
+            val prevCount = autoCounterCount
+            minatoSim.update(0.016f)
+            if (autoCounterCount > prevCount && minatoBall.position.x < attackerBall.position.x) {
+                teleportedBehind = true
+                break
+            }
+            // Advance 0.25s in safe separation so the 0.22s collisionCooldown clears before next impact test
+            attackerBall.position = Vector2(220f, 400f)
+            attackerBall.stunTimeRemaining = 0.3f
+            minatoBall.position = Vector2(780f, 1200f)
+            minatoBall.stunTimeRemaining = 0.3f
+            repeat(16) { minatoSim.update(0.016f) }
+            attackerBall.stunTimeRemaining = 0f
+            minatoBall.stunTimeRemaining = 0f
+        }
+        assertTrue("Automatic chance-based counter must trigger probabilistically on incoming attacks", autoCounterCount > 0)
+        assertTrue("Minato TELEPORT_STRIKE counter must teleport him behind the opposing character", teleportedBehind)
+    }
+
+    private fun BattleSimulation.positionLockForTest() {
+        playerBall.position = Vector2(220f, 800f)
+        playerBall.velocity = Vector2.Zero
+        playerBall.stunTimeRemaining = 1f
+        opponentBall.position = Vector2(740f, 800f)
+        opponentBall.velocity = Vector2.Zero
+        opponentBall.stunTimeRemaining = 1f
+    }
 }

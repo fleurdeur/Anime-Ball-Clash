@@ -59,6 +59,7 @@ sealed class LanPacket {
     data class StartClash(val dirX: Float, val dirY: Float) : LanPacket()
     data class RedirectDash(val dirX: Float, val dirY: Float) : LanPacket()
     data object TriggerUlt : LanPacket()
+    data object TriggerCounter : LanPacket()
     data class HostStateSync(
         val hostX: Float,
         val hostY: Float,
@@ -73,7 +74,11 @@ sealed class LanPacket {
         val hostUlt: Float,
         val guestUlt: Float
     ) : LanPacket()
-    data class Knockout(val hostWon: Boolean) : LanPacket()
+    data class Knockout(
+        val hostWon: Boolean,
+        val hostFinalHp: Float = 0f,
+        val guestFinalHp: Float = 0f
+    ) : LanPacket()
     data object PeerDisconnected : LanPacket()
 }
 
@@ -359,6 +364,10 @@ class LanMultiplayerManager(context: Context) {
                 _incomingPackets.tryEmit(LanPacket.TriggerUlt)
             }
 
+            "COUNTER" -> {
+                _incomingPackets.tryEmit(LanPacket.TriggerCounter)
+            }
+
             "SYNC" -> {
                 if (tokens.size >= 13) {
                     val hx = tokens[1].toFloatOrNull() ?: return
@@ -395,7 +404,9 @@ class LanMultiplayerManager(context: Context) {
             "KO" -> {
                 if (tokens.size >= 2) {
                     val hostWon = tokens[1] == "1"
-                    _incomingPackets.tryEmit(LanPacket.Knockout(hostWon))
+                    val hHp = tokens.getOrNull(2)?.toFloatOrNull() ?: 0f
+                    val gHp = tokens.getOrNull(3)?.toFloatOrNull() ?: 0f
+                    _incomingPackets.tryEmit(LanPacket.Knockout(hostWon, hHp, gHp))
                 }
             }
         }
@@ -411,6 +422,10 @@ class LanMultiplayerManager(context: Context) {
 
     fun sendUltimate() {
         sendRawLine("ULT")
+    }
+
+    fun sendCounter() {
+        sendRawLine("COUNTER")
     }
 
     fun sendHostStateSync(
@@ -447,8 +462,8 @@ class LanMultiplayerManager(context: Context) {
         )
     }
 
-    fun sendKnockout(hostWon: Boolean) {
-        sendRawLine("KO|${if (hostWon) 1 else 0}")
+    fun sendKnockout(hostWon: Boolean, hostFinalHp: Float = 0f, guestFinalHp: Float = 0f) {
+        sendRawLine(String.format(Locale.US, "KO|%d|%.1f|%.1f", if (hostWon) 1 else 0, hostFinalHp, guestFinalHp))
     }
 
     private fun sendRawLine(line: String) {

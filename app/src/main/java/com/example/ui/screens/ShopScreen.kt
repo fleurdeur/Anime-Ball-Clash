@@ -272,8 +272,9 @@ fun ShopScreen(
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis
                                         )
+                                        val standSuffix = if (character.hasStandSpirit) " • Stand: ${character.joJoStandStyle.standName}" else ""
                                         Text(
-                                            text = "${character.alignment.badgeLabel} • ${character.animeInspiration} • ${character.maxHp} HP",
+                                            text = "${character.alignment.badgeLabel} • ${character.animeRace.simpleName} • ${character.maxHp} HP$standSuffix",
                                             style = MaterialTheme.typography.labelSmall,
                                             color = if (isVillain) palette.primaryAccent else palette.blueAccent,
                                             maxLines = 1,
@@ -281,7 +282,7 @@ fun ShopScreen(
                                         )
                                         Spacer(modifier = Modifier.height(4.dp))
                                         Text(
-                                            text = "${character.passiveName}: ${character.passiveDescription}",
+                                            text = "${character.passiveName}: ${character.simplePassiveSummary} • Auto ${character.counterArchetype.simpleName} (${character.autoCounterPercent}%)",
                                             style = MaterialTheme.typography.bodyMedium,
                                             color = palette.textSecondary,
                                             maxLines = 2,

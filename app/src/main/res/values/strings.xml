@@ -23,6 +23,12 @@
     <string name="sign_out">Sign Out</string>
     <string name="custom_play_title">Custom Match</string>
     <string name="multiplayer_lobby_title">VS Friend</string>
-    <string name="lan_wifi_tab">LAN Wi-Fi</string>
+    <string name="lan_wifi_tab">Wi-Fi</string>
     <string name="online_room_tab">Room Code</string>
+    <string name="music_label">Fight Music</string>
+    <string name="counter_ready">Counter</string>
+    <string name="multi_dash_active">Multi-Dash!</string>
+    <string name="daily_quests_tab">Daily</string>
+    <string name="main_quests_tab">All-Time</string>
+    <string name="back_label">Back</string>
 </resources>

@@ -73,12 +73,15 @@ function validMatchRoom(hostUid, now) {
     hostDirX: 0,
     hostDirY: 0,
     hostUltSeq: 0,
+    hostCounterSeq: 0,
     hostSyncHp: 405,
     guestCmdSeq: 0,
     guestDirX: 0,
     guestDirY: 0,
     guestUltSeq: 0,
+    guestCounterSeq: 0,
     guestSyncHp: 360,
+    syncStatePacked: '',
     winnerUid: '',
     createdAt: now,
     updatedAt: now,
@@ -161,7 +164,7 @@ test('leaderboard enforces query constraint on list and owner-only writes', asyn
   await assertFails(bobDb.collection('leaderboard').doc('alice').update({ rating: 0, updatedAt: now }));
 });
 
-test('match_rooms enforces host creation, guest join transition, action-scoped updates, and terminal lock', async () => {
+test('match_rooms enforces host authoritative sync, counter updates, guest forfeit, and terminal lock', async () => {
   const hostDb = testEnv.authenticatedContext('host_1').firestore();
   const guestDb = testEnv.authenticatedContext('guest_2').firestore();
   const intruderDb = testEnv.authenticatedContext('intruder_3').firestore();
@@ -216,31 +219,53 @@ test('match_rooms enforces host creation, guest join transition, action-scoped u
     })
   );
 
+  // Guest cannot mutate host sequence or syncStatePacked
   await assertFails(
     roomRefGuest.update({
       hostCmdSeq: 5,
       updatedAt: joinTime,
     })
   );
+  await assertFails(
+    roomRefGuest.update({
+      syncStatePacked: '0.5,0.7,0.2,-0.8,0.5,0.3,-0.2,0.8,350,320,40,50',
+      updatedAt: joinTime,
+    })
+  );
 
   const combatTime = new Date(Date.now() - 500);
+  // Host sends impulse + counter + authoritative packed state
   await assertSucceeds(
     roomRefHost.update({
       hostCmdSeq: 1,
       hostDirX: 0.45,
       hostDirY: -0.89,
+      hostCounterSeq: 1,
+      syncStatePacked: '0.52,0.74,0.34,-0.88,0.48,0.26,-0.34,0.88,390,340,25,30',
       updatedAt: combatTime,
     })
   );
+  // Guest sends impulse + counter
   await assertSucceeds(
     roomRefGuest.update({
       guestCmdSeq: 1,
       guestDirX: -0.45,
       guestDirY: 0.89,
+      guestCounterSeq: 1,
       updatedAt: combatTime,
     })
   );
 
+  // Guest CANNOT claim self-victory (only Host is authoritative for non-forfeit outcomes)
+  await assertFails(
+    roomRefGuest.update({
+      status: 'finished',
+      winnerUid: 'guest_2',
+      updatedAt: combatTime,
+    })
+  );
+
+  // Host finishes match authoritatively
   await assertSucceeds(
     roomRefHost.update({
       status: 'finished',
@@ -260,4 +285,30 @@ test('match_rooms enforces host creation, guest join transition, action-scoped u
   );
 
   await assertSucceeds(roomRefHost.delete());
+
+  // Verify Guest clean forfeit awards win to Host
+  const roomRefHost2 = hostDb.collection('match_rooms').doc('room_FORFEIT1');
+  const roomRefGuest2 = guestDb.collection('match_rooms').doc('room_FORFEIT1');
+  await assertSucceeds(roomRefHost2.set(validMatchRoom('host_1', now)));
+  await assertSucceeds(
+    roomRefGuest2.update({
+      status: 'active',
+      guestUid: 'guest_2',
+      guestName: 'RivalGuest',
+      guestCharId: 'kamado_sun',
+      guestRating: 280,
+      guestHpLvl: 0,
+      guestPwrLvl: 0,
+      guestCdLvl: 0,
+      guestSyncHp: 350,
+      updatedAt: joinTime,
+    })
+  );
+  await assertSucceeds(
+    roomRefGuest2.update({
+      status: 'finished',
+      winnerUid: 'host_1',
+      updatedAt: combatTime,
+    })
+  );
 });
