@@ -14,6 +14,7 @@ import java.io.FileOutputStream
 import kotlin.math.PI
 import kotlin.math.exp
 import kotlin.math.sin
+import kotlin.math.tanh
 import kotlin.random.Random
 
 enum class BattleBgmSituation {
@@ -28,14 +29,12 @@ enum class BattleBgmSituation {
  * Directs situational fighting Background Music (BGM) and plays each character's
  * official recorded Ultimate anime voice audio clip when Ultimate mode activates.
  *
- * - BGM dynamically shifts across 4 live combat states using real Mixkit / Internet Archive
- *   MP3 tracks cached via [RealAudioRepository] (with offline acoustic WAV fallback):
- *   1. OPENING_TENSION (Pre-launch / Aiming)
- *   2. NORMAL_CLASH (Standard high-energy duel)
- *   3. ULTIMATE_SURGE (Either fighter in Ultimate Awakening!)
- *   4. CLUTCH_DANGER (Low HP < 32% clutch showdown!)
- * - Ultimate Voice Audio plays genuine recorded anime voice MP3 clips cached per character
- *   through [MediaPlayer] while ducking BGM volume. Strictly zero synthetic or AI voice is ever used.
+ * Audio channels are cleanly separated:
+ * - [musicEnabled]: Controls Game Music (BGM) independently.
+ * - [voiceLinesEnabled]: Controls Official Ultimate Voice Lines independently.
+ * - Sound Effects are controlled independently via [SoundManager.isEnabled].
+ *
+ * Strictly zero synthetic or AI voice is ever used anywhere.
  */
 class BattleAudioDirector(context: Context?) {
 
@@ -43,15 +42,22 @@ class BattleAudioDirector(context: Context?) {
     private val audioScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     @Volatile
-    private var _voiceEnabled: Boolean = true
+    private var _voiceLinesEnabled: Boolean = true
 
-    var sfxEnabled: Boolean
-        get() = _voiceEnabled
+    var voiceLinesEnabled: Boolean
+        get() = _voiceLinesEnabled
         set(value) {
-            _voiceEnabled = value
+            _voiceLinesEnabled = value
             if (!value) {
                 stopVoicePlayerInternal()
             }
+        }
+
+    // Legacy compatibility alias
+    var sfxEnabled: Boolean
+        get() = _voiceLinesEnabled
+        set(value) {
+            voiceLinesEnabled = value
         }
 
     @Volatile
@@ -123,7 +129,11 @@ class BattleAudioDirector(context: Context?) {
             BattleBgmSituation.CLUTCH_DANGER
         )
         try {
-            val bgmDir = File(ctx.cacheDir, "abc_bgm_v1").apply { mkdirs() }
+            try {
+                File(ctx.cacheDir, "abc_bgm_v1").deleteRecursively()
+            } catch (_: Throwable) {
+            }
+            val bgmDir = File(ctx.cacheDir, "abc_bgm_v3").apply { mkdirs() }
             for (sit in situations) {
                 val cachedRealMp3 = RealAudioRepository.getCachedBgmFile(ctx, sit)
                 val initialTrack = if (cachedRealMp3 != null) {
@@ -149,7 +159,7 @@ class BattleAudioDirector(context: Context?) {
             tracksPrepared = false
         }
 
-        // Download real Mixkit / Internet Archive BGM MP3s and seamlessly upgrade tracks
+        // Download verified Rock / Metal / Fight BGM MP3s and seamlessly upgrade tracks
         for (sit in situations) {
             if (RealAudioRepository.getCachedBgmFile(ctx, sit) == null) {
                 audioScope.launch {
@@ -175,7 +185,7 @@ class BattleAudioDirector(context: Context?) {
      * Strictly uses real recorded audio files via MediaPlayer — never synthetic speech.
      */
     fun speakUltimateVoiceLine(character: CharacterData, isPlayer: Boolean) {
-        if (!_voiceEnabled) return
+        if (!_voiceLinesEnabled) return
         val line = character.officialUltVoiceLine.ifBlank { character.voiceLine }
         spokenVoiceCount++
         lastSpokenLine = line
@@ -186,14 +196,14 @@ class BattleAudioDirector(context: Context?) {
                 ?: RealAudioRepository.fetchOfficialUltVoiceFile(ctx, character)
                 ?: return@launch
 
-            if (!_voiceEnabled || !isAppForeground) return@launch
+            if (!_voiceLinesEnabled || !isAppForeground) return@launch
             playOfficialVoiceClip(voiceFile, isPlayer)
         }
     }
 
     @Synchronized
     private fun playOfficialVoiceClip(file: File, isPlayer: Boolean) {
-        if (!_voiceEnabled || !isAppForeground || !file.exists()) return
+        if (!_voiceLinesEnabled || !isAppForeground || !file.exists()) return
         stopVoicePlayerInternal()
         try {
             val vp = MediaPlayer()
@@ -357,12 +367,12 @@ class BattleAudioDirector(context: Context?) {
     private fun computeTargetVolume(situation: BattleBgmSituation): Float {
         val base = when (situation) {
             BattleBgmSituation.NONE -> 0f
-            BattleBgmSituation.OPENING_TENSION -> 0.28f
-            BattleBgmSituation.NORMAL_CLASH -> 0.36f
-            BattleBgmSituation.ULTIMATE_SURGE -> 0.44f
-            BattleBgmSituation.CLUTCH_DANGER -> 0.42f
+            BattleBgmSituation.OPENING_TENSION -> 0.26f
+            BattleBgmSituation.NORMAL_CLASH -> 0.34f
+            BattleBgmSituation.ULTIMATE_SURGE -> 0.42f
+            BattleBgmSituation.CLUTCH_DANGER -> 0.40f
         }
-        return if (voiceDuckingActive) base * 0.36f else base
+        return if (voiceDuckingActive) base * 0.32f else base
     }
 
     @Synchronized
@@ -386,17 +396,18 @@ class BattleAudioDirector(context: Context?) {
     }
 
     companion object {
-        private const val SAMPLE_RATE = 16000
+        private const val SAMPLE_RATE = 24000
 
         /**
-         * Synthesizes a seamless 16-step looping anime battle music bar tailored to the fight situation.
+         * Synthesizes a warm, punchy 32-step looping anime rock/taiko battle music bar
+         * with filtered bass guitar, power-chord fifths, deep kick, and clean snare transients.
          */
         fun synthesizeBgmTrackWav(situation: BattleBgmSituation): ByteArray {
             val stepDurationSec = when (situation) {
-                BattleBgmSituation.OPENING_TENSION -> 0.24f // ~125 BPM half-time pulse
-                BattleBgmSituation.NORMAL_CLASH -> 0.145f   // ~138 BPM shonen groove
-                BattleBgmSituation.ULTIMATE_SURGE -> 0.118f // ~169 BPM awakening overdrive
-                BattleBgmSituation.CLUTCH_DANGER -> 0.110f  // ~181 BPM low-HP clutch
+                BattleBgmSituation.OPENING_TENSION -> 0.22f
+                BattleBgmSituation.NORMAL_CLASH -> 0.140f
+                BattleBgmSituation.ULTIMATE_SURGE -> 0.118f
+                BattleBgmSituation.CLUTCH_DANGER -> 0.110f
                 BattleBgmSituation.NONE -> 0.10f
             }
             val totalSteps = 16
@@ -404,102 +415,106 @@ class BattleAudioDirector(context: Context?) {
             val totalSamples = samplesPerStep * totalSteps
             val pcm = ShortArray(totalSamples)
 
-            // Japanese Yo / Hirajoshi & Shonen heroic scales (Hz)
             val bassNotes = when (situation) {
                 BattleBgmSituation.OPENING_TENSION -> doubleArrayOf(
-                    110.0, 110.0, 130.81, 110.0, 98.0, 98.0, 123.47, 110.0,
-                    110.0, 110.0, 146.83, 130.81, 98.0, 110.0, 123.47, 130.81
+                    82.41, 82.41, 98.00, 82.41, 73.42, 73.42, 92.50, 82.41,
+                    82.41, 82.41, 110.00, 98.00, 73.42, 82.41, 92.50, 98.00
                 )
                 BattleBgmSituation.NORMAL_CLASH -> doubleArrayOf(
-                    146.83, 146.83, 174.61, 196.00, 220.00, 220.00, 196.00, 174.61,
-                    130.81, 130.81, 146.83, 174.61, 196.00, 174.61, 164.81, 146.83
+                    110.00, 110.00, 130.81, 146.83, 164.81, 164.81, 146.83, 130.81,
+                    98.00, 98.00, 110.00, 130.81, 146.83, 130.81, 123.47, 110.00
                 )
                 BattleBgmSituation.ULTIMATE_SURGE -> doubleArrayOf(
-                    174.61, 174.61, 220.00, 261.63, 293.66, 293.66, 261.63, 220.00,
-                    196.00, 196.00, 220.00, 261.63, 329.63, 293.66, 261.63, 220.00
+                    146.83, 146.83, 174.61, 220.00, 261.63, 261.63, 220.00, 196.00,
+                    164.81, 164.81, 196.00, 220.00, 293.66, 261.63, 220.00, 196.00
                 )
                 else -> doubleArrayOf(
-                    155.56, 155.56, 185.00, 155.56, 146.83, 146.83, 174.61, 146.83,
-                    138.59, 138.59, 164.81, 185.00, 196.00, 185.00, 174.61, 155.56
+                    123.47, 123.47, 146.83, 123.47, 110.00, 110.00, 130.81, 110.00,
+                    103.83, 103.83, 123.47, 146.83, 164.81, 146.83, 130.81, 123.47
                 )
             }
 
-            val leadNotes = when (situation) {
+            val riffNotes = when (situation) {
                 BattleBgmSituation.OPENING_TENSION -> doubleArrayOf(
-                    440.0, 0.0, 523.25, 493.88, 440.0, 0.0, 392.0, 440.0,
-                    523.25, 0.0, 587.33, 523.25, 493.88, 440.0, 392.0, 0.0
+                    329.63, 0.0, 392.00, 369.99, 329.63, 0.0, 293.66, 329.63,
+                    392.00, 0.0, 440.00, 392.00, 369.99, 329.63, 293.66, 0.0
                 )
                 BattleBgmSituation.NORMAL_CLASH -> doubleArrayOf(
-                    587.33, 698.46, 783.99, 880.00, 783.99, 698.46, 587.33, 523.25,
-                    587.33, 698.46, 880.00, 1046.50, 880.00, 783.99, 698.46, 659.25
+                    440.00, 0.0, 523.25, 587.33, 659.25, 587.33, 523.25, 440.00,
+                    392.00, 440.00, 523.25, 659.25, 587.33, 523.25, 493.88, 440.00
                 )
                 BattleBgmSituation.ULTIMATE_SURGE -> doubleArrayOf(
-                    698.46, 880.00, 1046.50, 1174.66, 1318.51, 1174.66, 1046.50, 880.00,
-                    783.99, 987.77, 1174.66, 1318.51, 1567.98, 1318.51, 1174.66, 1046.50
+                    587.33, 698.46, 880.00, 1046.50, 1174.66, 1046.50, 880.00, 783.99,
+                    659.25, 783.99, 880.00, 1046.50, 1318.51, 1174.66, 1046.50, 880.00
                 )
                 else -> doubleArrayOf(
-                    622.25, 739.99, 932.33, 739.99, 587.33, 698.46, 880.00, 698.46,
-                    554.37, 659.25, 830.61, 932.33, 987.77, 932.33, 880.00, 783.99
+                    493.88, 587.33, 739.99, 587.33, 440.00, 523.25, 659.25, 523.25,
+                    415.30, 493.88, 622.25, 739.99, 783.99, 739.99, 659.25, 587.33
                 )
             }
 
             val rng = Random(situation.ordinal * 4099 + 17)
             var bassPhase = 0.0
-            var leadPhase = 0.0
+            var riffRootPhase = 0.0
+            var riffFifthPhase = 0.0
             var kickPhase = 0.0
+            var snareBodyPhase = 0.0
+            var noiseLp = 0.0
 
             for (step in 0 until totalSteps) {
                 val bassFreq = bassNotes[step % bassNotes.size]
-                val leadFreq = leadNotes[step % leadNotes.size]
-                val hasKick = (step % 4 == 0) || (situation == BattleBgmSituation.ULTIMATE_SURGE && step % 2 == 0) ||
+                val riffFreq = riffNotes[step % riffNotes.size]
+                val hasKick = (step % 4 == 0) ||
+                    (situation == BattleBgmSituation.ULTIMATE_SURGE && step % 2 == 0) ||
                     (situation == BattleBgmSituation.CLUTCH_DANGER && (step % 4 == 0 || step % 4 == 3))
                 val hasSnare = (step % 4 == 2) && situation != BattleBgmSituation.OPENING_TENSION
-                val hasHat = situation != BattleBgmSituation.OPENING_TENSION || (step % 2 == 0)
 
                 if (hasKick) kickPhase = 0.0
+                if (hasSnare) snareBodyPhase = 0.0
 
                 for (s in 0 until samplesPerStep) {
                     val stepT = s.toDouble() / SAMPLE_RATE
                     val stepNorm = s.toDouble() / samplesPerStep
+                    val white = rng.nextDouble() * 2.0 - 1.0
+                    noiseLp += 0.18 * (white - noiseLp)
 
-                    // Driving synth bass
+                    // Warm saturated rock bass
                     bassPhase += 2.0 * PI * bassFreq / SAMPLE_RATE
-                    val bassEnv = (1.0 - stepNorm * 0.55)
-                    val bassSig = (sin(bassPhase) * 0.65 + sin(bassPhase * 2.0) * 0.35) * bassEnv * 0.34
+                    val bassEnv = (1.0 - stepNorm * 0.45) * (1.0 - exp(-stepT * 110.0))
+                    val bassSig = tanh(sin(bassPhase) * 1.55) * bassEnv * 0.34
 
-                    // Shonen lead synth
-                    val leadSig = if (leadFreq > 1.0) {
-                        leadPhase += 2.0 * PI * leadFreq / SAMPLE_RATE
-                        val attack = (stepNorm * 14.0).coerceAtMost(1.0)
-                        val decay = exp(-stepT * 7.5)
-                        (sin(leadPhase) * 0.62 + sin(leadPhase * 1.5) * 0.18 + sin(leadPhase * 2.0) * 0.20) *
-                            attack * decay * 0.30
+                    // Warm overdriven power-chord guitar/synth riff (root + perfect 5th)
+                    val riffSig = if (riffFreq > 1.0) {
+                        riffRootPhase += 2.0 * PI * riffFreq / SAMPLE_RATE
+                        riffFifthPhase += 2.0 * PI * (riffFreq * 1.498) / SAMPLE_RATE
+                        val attack = (1.0 - exp(-stepT * 95.0))
+                        val decay = exp(-stepT * 7.8)
+                        tanh((sin(riffRootPhase) * 0.68 + sin(riffFifthPhase) * 0.42) * 1.35) *
+                            attack * decay * 0.24
                     } else {
                         0.0
                     }
 
-                    // Taiko / Kick drum
+                    // Punchy Taiko / Rock Kick
                     val kickSig = if (hasKick) {
-                        val kf = 135.0 * exp(-stepT * 28.0) + 46.0
+                        val kf = 148.0 * exp(-stepT * 32.0) + 45.0
                         kickPhase += 2.0 * PI * kf / SAMPLE_RATE
-                        sin(kickPhase) * exp(-stepT * 19.0) * 0.42
+                        tanh(sin(kickPhase) * 1.4) * exp(-stepT * 18.0) * 0.46
                     } else {
                         0.0
                     }
 
-                    // Snare & Hi-hat percussion
+                    // Tight acoustic snare (185 Hz drum body + smooth lowpass snap)
                     val snareSig = if (hasSnare) {
-                        (rng.nextDouble() * 2.0 - 1.0) * exp(-stepT * 26.0) * 0.24
-                    } else {
-                        0.0
-                    }
-                    val hatSig = if (hasHat) {
-                        (rng.nextDouble() * 2.0 - 1.0) * exp(-stepT * 62.0) * 0.08
+                        snareBodyPhase += 2.0 * PI * 185.0 / SAMPLE_RATE
+                        val body = sin(snareBodyPhase) * exp(-stepT * 34.0) * 0.22
+                        val snap = noiseLp * exp(-stepT * 28.0) * 0.20
+                        body + snap
                     } else {
                         0.0
                     }
 
-                    val mixed = (bassSig + leadSig + kickSig + snareSig + hatSig).coerceIn(-0.92, 0.92)
+                    val mixed = (bassSig + riffSig + kickSig + snareSig).coerceIn(-0.92, 0.92)
                     pcm[step * samplesPerStep + s] = (mixed * Short.MAX_VALUE).toInt().toShort()
                 }
             }

@@ -19,11 +19,14 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.Logout
+import androidx.compose.material.icons.automirrored.outlined.VolumeUp
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.automirrored.outlined.Logout
 import androidx.compose.material.icons.outlined.DarkMode
 import androidx.compose.material.icons.outlined.LightMode
+import androidx.compose.material.icons.outlined.MusicNote
+import androidx.compose.material.icons.outlined.RecordVoiceOver
 import androidx.compose.material.icons.outlined.RestartAlt
 import androidx.compose.material.icons.outlined.SettingsBrightness
 import androidx.compose.material.icons.outlined.Tune
@@ -100,8 +103,9 @@ fun GraphicsConfigDialog(
     var selectedRenderMode by remember(currentSettings.renderMode) { mutableStateOf(currentSettings.renderMode) }
     var selectedPhysicsMesh by remember(currentSettings.physicsMesh) { mutableStateOf(currentSettings.physicsMesh) }
     var selectedFps by remember(currentSettings.targetFps) { mutableStateOf(currentSettings.targetFps) }
-    var sfxEnabled by remember(currentSettings.sfxEnabled) { mutableStateOf(currentSettings.sfxEnabled) }
     var musicEnabled by remember(currentSettings.musicEnabled) { mutableStateOf(currentSettings.musicEnabled) }
+    var sfxEnabled by remember(currentSettings.sfxEnabled) { mutableStateOf(currentSettings.sfxEnabled) }
+    var voiceLinesEnabled by remember(currentSettings.voiceLinesEnabled) { mutableStateOf(currentSettings.voiceLinesEnabled) }
     var hapticsEnabled by remember(currentSettings.hapticsEnabled) { mutableStateOf(currentSettings.hapticsEnabled) }
     var screenShake by remember(currentSettings.screenShake) { mutableStateOf(currentSettings.screenShake) }
     var confirmReset by remember { mutableStateOf(false) }
@@ -117,8 +121,9 @@ fun GraphicsConfigDialog(
         render: RenderMode = selectedRenderMode,
         mesh: PhysicsMesh = selectedPhysicsMesh,
         fps: TargetFPS = selectedFps,
-        sfx: Boolean = sfxEnabled,
         music: Boolean = musicEnabled,
+        sfx: Boolean = sfxEnabled,
+        voiceLines: Boolean = voiceLinesEnabled,
         haptics: Boolean = hapticsEnabled,
         shake: Boolean = screenShake
     ) {
@@ -128,8 +133,9 @@ fun GraphicsConfigDialog(
                 renderMode = render,
                 physicsMesh = mesh,
                 targetFps = fps,
-                sfxEnabled = sfx,
                 musicEnabled = music,
+                sfxEnabled = sfx,
+                voiceLinesEnabled = voiceLines,
                 hapticsEnabled = haptics,
                 bloomPostFx = render.bloomGlow,
                 screenShake = shake
@@ -356,45 +362,37 @@ fun GraphicsConfigDialog(
 
                 HorizontalDivider(color = palette.border)
 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("Sound & Voice", style = MaterialTheme.typography.bodyLarge, color = palette.textPrimary)
-                        Text(
-                            text = "Hits, Counter blocks & Ultimate voice lines",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = palette.textSecondary
-                        )
-                    }
-                    Switch(
-                        checked = sfxEnabled,
-                        onCheckedChange = {
-                            sfxEnabled = it
-                            pushLiveSettings(sfx = it)
-                        },
-                        colors = SwitchDefaults.colors(
-                            checkedThumbColor = Color.White,
-                            checkedTrackColor = palette.primaryAccent
-                        ),
-                        modifier = Modifier.testTag("sfx_toggle_switch")
-                    )
-                }
+                Text(
+                    text = "Audio",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = palette.textPrimary
+                )
 
+                // 1. Game Music
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("Fight Music", style = MaterialTheme.typography.bodyLarge, color = palette.textPrimary)
-                        Text(
-                            text = "Changes live with Clash, Ultimate & low HP",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = palette.textSecondary
+                    Row(
+                        modifier = Modifier.weight(1f),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.MusicNote,
+                            contentDescription = null,
+                            tint = if (musicEnabled) palette.goldAccent else palette.textMuted,
+                            modifier = Modifier.size(20.dp)
                         )
+                        Column {
+                            Text("Game Music", style = MaterialTheme.typography.bodyLarge, color = palette.textPrimary)
+                            Text(
+                                text = "Background music during fights",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = palette.textSecondary
+                            )
+                        }
                     }
                     Switch(
                         checked = musicEnabled,
@@ -409,6 +407,88 @@ fun GraphicsConfigDialog(
                         modifier = Modifier.testTag("music_toggle_switch")
                     )
                 }
+
+                // 2. Sound Effects
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        modifier = Modifier.weight(1f),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Outlined.VolumeUp,
+                            contentDescription = null,
+                            tint = if (sfxEnabled) palette.blueAccent else palette.textMuted,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Column {
+                            Text("Sound Effects", style = MaterialTheme.typography.bodyLarge, color = palette.textPrimary)
+                            Text(
+                                text = "Hits, dashes, bounces & counter clashes",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = palette.textSecondary
+                            )
+                        }
+                    }
+                    Switch(
+                        checked = sfxEnabled,
+                        onCheckedChange = {
+                            sfxEnabled = it
+                            pushLiveSettings(sfx = it)
+                        },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = Color.White,
+                            checkedTrackColor = palette.blueAccent
+                        ),
+                        modifier = Modifier.testTag("sfx_toggle_switch")
+                    )
+                }
+
+                // 3. Voice Lines
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        modifier = Modifier.weight(1f),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.RecordVoiceOver,
+                            contentDescription = null,
+                            tint = if (voiceLinesEnabled) palette.primaryAccent else palette.textMuted,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Column {
+                            Text("Voice Lines", style = MaterialTheme.typography.bodyLarge, color = palette.textPrimary)
+                            Text(
+                                text = "Official character Ultimate voice audio",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = palette.textSecondary
+                            )
+                        }
+                    }
+                    Switch(
+                        checked = voiceLinesEnabled,
+                        onCheckedChange = {
+                            voiceLinesEnabled = it
+                            pushLiveSettings(voiceLines = it)
+                        },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = Color.White,
+                            checkedTrackColor = palette.primaryAccent
+                        ),
+                        modifier = Modifier.testTag("voice_lines_toggle_switch")
+                    )
+                }
+
+                HorizontalDivider(color = palette.border)
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),

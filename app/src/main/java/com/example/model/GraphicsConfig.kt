@@ -80,8 +80,9 @@ data class EngineSettings(
     val renderMode: RenderMode = RenderMode.BALANCED,
     val physicsMesh: PhysicsMesh = PhysicsMesh.DYNAMIC,
     val targetFps: TargetFPS = TargetFPS.FPS_60,
-    val sfxEnabled: Boolean = true,
     val musicEnabled: Boolean = true,
+    val sfxEnabled: Boolean = true,
+    val voiceLinesEnabled: Boolean = true,
     val hapticsEnabled: Boolean = true,
     val bloomPostFx: Boolean = false,
     val screenShake: Boolean = true

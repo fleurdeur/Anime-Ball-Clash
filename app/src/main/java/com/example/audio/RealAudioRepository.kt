@@ -10,8 +10,9 @@ import java.net.URLEncoder
 import java.util.concurrent.ConcurrentHashMap
 
 /**
- * Fetches, validates, and disk-caches real MP3/OGG sound effects, background music tracks,
- * and official recorded anime character Ultimate voice clips from public web repositories
+ * Fetches, title-verifies, magic-byte validates, and disk-caches crisp anime/arcade
+ * sound effects, rock/action/metal battle background music tracks, and official recorded
+ * anime character Ultimate voice clips from public web repositories
  * (Mixkit CDN, MyInstants, SoundInstants, Internet Archive).
  *
  * STRICTLY ZERO AI TEXT-TO-SPEECH OR SYNTHETIC VOICE IS EVER USED HERE OR ANYWHERE IN THE APP.
@@ -21,20 +22,36 @@ object RealAudioRepository {
     private const val USER_AGENT =
         "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
 
-    private val inFlightDownloads = ConcurrentHashMap<String, Boolean>()
-    private val scrapedCategoryCache = ConcurrentHashMap<String, List<String>>()
+    private data class ScoredAudioCandidate(
+        val title: String,
+        val url: String
+    )
 
-    private fun rootDir(context: Context): File =
-        File(context.filesDir, "real_audio_v2").apply { mkdirs() }
+    private val inFlightDownloads = ConcurrentHashMap<String, Boolean>()
+    private val scrapedCategoryCache = ConcurrentHashMap<String, List<ScoredAudioCandidate>>()
+    @Volatile
+    private var legacyCachePurged = false
+
+    private fun rootDir(context: Context): File {
+        if (!legacyCachePurged) {
+            legacyCachePurged = true
+            try {
+                File(context.filesDir, "real_audio_v2").deleteRecursively()
+            } catch (_: Throwable) {
+            }
+        }
+        return File(context.filesDir, "real_audio_v3").apply { mkdirs() }
+    }
 
     fun getCachedSfxFile(context: Context, sfx: GameSfx): File? {
         val f = File(File(rootDir(context), "sfx").apply { mkdirs() }, "${sfx.name.lowercase()}.mp3")
-        return if (f.exists() && f.length() > 1024L) f else null
+        val maxLen = maxSfxBytes(sfx).toLong()
+        return if (f.exists() && f.length() in 1024L..maxLen) f else null
     }
 
     fun getCachedBgmFile(context: Context, situation: BattleBgmSituation): File? {
         val f = File(File(rootDir(context), "bgm").apply { mkdirs() }, "${situation.name.lowercase()}.mp3")
-        return if (f.exists() && f.length() > 4096L) f else null
+        return if (f.exists() && f.length() > 8192L) f else null
     }
 
     fun getCachedVoiceFile(context: Context, characterId: String): File? {
@@ -43,8 +60,16 @@ object RealAudioRepository {
         return if (f.exists() && f.length() > 1200L) f else null
     }
 
+    private fun maxSfxBytes(sfx: GameSfx): Int = when (sfx) {
+        GameSfx.UI_TAP -> 55_000
+        GameSfx.WALL_BOUNCE -> 78_000
+        GameSfx.BALL_CLASH, GameSfx.REDIRECT_DASH -> 125_000
+        GameSfx.CRIT_CLASH, GameSfx.COUNTER_PARRY, GameSfx.PASSIVE_TRIGGER, GameSfx.UPGRADE_FORGE -> 165_000
+        GameSfx.AWAKENING_PLAYER, GameSfx.AWAKENING_AI, GameSfx.KNOCKOUT_FINISH -> 290_000
+    }
+
     /**
-     * Downloads and caches real Mixkit / Internet Archive sound effects for combat & UI.
+     * Downloads and caches crisp, punchy combat & UI sound effects verified by title and file duration/size.
      */
     fun fetchSfxFile(context: Context, sfx: GameSfx): File? {
         getCachedSfxFile(context, sfx)?.let { return it }
@@ -53,49 +78,73 @@ object RealAudioRepository {
 
         try {
             val dest = File(File(rootDir(context), "sfx").apply { mkdirs() }, "${sfx.name.lowercase()}.mp3")
-            val directUrls = directMixkitSfxUrls(sfx)
-            for (url in directUrls) {
-                if (downloadValidAudioToFile(url, dest, minBytes = 1024)) {
+            val maxBytes = maxSfxBytes(sfx)
+
+            // 1. Try verified title-matched Mixkit SFX URLs first
+            for (url in verifiedMixkitSfxUrls(sfx)) {
+                if (downloadValidAudioToFile(url, dest, minBytes = 1024, maxBytes = maxBytes)) {
                     return dest
                 }
             }
 
-            // Fallback: scrape live Mixkit free-sound-effects category page for fresh CDN preview MP3s
-            val categorySlug = when (sfx) {
-                GameSfx.WALL_BOUNCE, GameSfx.UI_TAP -> "click"
-                GameSfx.BALL_CLASH, GameSfx.CRIT_CLASH -> "punch"
-                GameSfx.COUNTER_PARRY, GameSfx.REDIRECT_DASH -> "sword"
-                GameSfx.AWAKENING_PLAYER, GameSfx.AWAKENING_AI, GameSfx.PASSIVE_TRIGGER -> "electricity"
-                GameSfx.KNOCKOUT_FINISH -> "explosion"
-                GameSfx.UPGRADE_FORGE -> "win"
+            // 2. Scrape live Mixkit combat SFX categories and rank candidates by sound-design keywords
+            val categoryUrls = when (sfx) {
+                GameSfx.WALL_BOUNCE -> listOf(
+                    "https://mixkit.co/free-sound-effects/ball/",
+                    "https://mixkit.co/free-sound-effects/hit/"
+                )
+                GameSfx.BALL_CLASH -> listOf(
+                    "https://mixkit.co/free-sound-effects/martial-arts/",
+                    "https://mixkit.co/free-sound-effects/punch/"
+                )
+                GameSfx.CRIT_CLASH -> listOf(
+                    "https://mixkit.co/free-sound-effects/sword/",
+                    "https://mixkit.co/free-sound-effects/martial-arts/"
+                )
+                GameSfx.REDIRECT_DASH -> listOf(
+                    "https://mixkit.co/free-sound-effects/whoosh/",
+                    "https://mixkit.co/free-sound-effects/swish/"
+                )
+                GameSfx.COUNTER_PARRY -> listOf(
+                    "https://mixkit.co/free-sound-effects/sword/"
+                )
+                GameSfx.PASSIVE_TRIGGER -> listOf(
+                    "https://mixkit.co/free-sound-effects/magic/",
+                    "https://mixkit.co/free-sound-effects/sparkles/"
+                )
+                GameSfx.AWAKENING_PLAYER, GameSfx.AWAKENING_AI -> listOf(
+                    "https://mixkit.co/free-sound-effects/electricity/",
+                    "https://mixkit.co/free-sound-effects/magic/"
+                )
+                GameSfx.KNOCKOUT_FINISH -> listOf(
+                    "https://mixkit.co/free-sound-effects/explosion/",
+                    "https://mixkit.co/free-sound-effects/impact/"
+                )
+                GameSfx.UPGRADE_FORGE -> listOf(
+                    "https://mixkit.co/free-sound-effects/win/"
+                )
+                GameSfx.UI_TAP -> listOf(
+                    "https://mixkit.co/free-sound-effects/click/"
+                )
             }
-            val scraped = scrapeMixkitMp3Links("https://mixkit.co/free-sound-effects/$categorySlug/")
-            for ((idx, url) in scraped.withIndex()) {
-                if (idx >= 4) break
-                if (downloadValidAudioToFile(url, dest, minBytes = 1024)) {
+
+            val rankedCandidates = categoryUrls
+                .flatMap { scrapeMixkitScoredItems(it) }
+                .distinctBy { it.url }
+                .map { it to scoreSfxCandidate(sfx, it.title) }
+                .filter { it.second > 0 }
+                .sortedByDescending { it.second }
+
+            val offset = if (sfx == GameSfx.AWAKENING_AI) 1 else 0
+            val orderedUrls = rankedCandidates.drop(offset).map { it.first.url } +
+                rankedCandidates.take(offset).map { it.first.url }
+
+            for (url in orderedUrls.take(5)) {
+                if (downloadValidAudioToFile(url, dest, minBytes = 1024, maxBytes = maxBytes)) {
                     return dest
                 }
             }
 
-            // Secondary fallback: Internet Archive CC0 / public-domain sound effects
-            val archiveQuery = when (sfx) {
-                GameSfx.WALL_BOUNCE -> "bounce impact sound effect"
-                GameSfx.BALL_CLASH -> "punch hit sound effect"
-                GameSfx.CRIT_CLASH -> "heavy anime impact sound effect"
-                GameSfx.PASSIVE_TRIGGER -> "magic power up sound effect"
-                GameSfx.REDIRECT_DASH -> "whoosh dash sound effect"
-                GameSfx.COUNTER_PARRY -> "sword parry clang sound effect"
-                GameSfx.AWAKENING_PLAYER, GameSfx.AWAKENING_AI -> "anime aura powerup sound effect"
-                GameSfx.KNOCKOUT_FINISH -> "explosion boom impact sound effect"
-                GameSfx.UPGRADE_FORGE -> "level up chime sound effect"
-                GameSfx.UI_TAP -> "button click sound effect"
-            }
-            val archiveUrls = searchInternetArchiveAudioMp3s(archiveQuery, maxItems = 2)
-            for (url in archiveUrls) {
-                if (downloadValidAudioToFile(url, dest, minBytes = 1024)) {
-                    return dest
-                }
-            }
             return null
         } finally {
             inFlightDownloads.remove(lockKey)
@@ -103,7 +152,7 @@ object RealAudioRepository {
     }
 
     /**
-     * Downloads and caches real background music tracks from Mixkit Action/Rock stock music & Internet Archive.
+     * Downloads and caches genuine high-energy Action, Rock, and Metal battle BGM tracks from Mixkit & Internet Archive.
      */
     fun fetchBgmFile(context: Context, situation: BattleBgmSituation): File? {
         if (situation == BattleBgmSituation.NONE) return null
@@ -114,47 +163,58 @@ object RealAudioRepository {
         try {
             val dest = File(File(rootDir(context), "bgm").apply { mkdirs() }, "${situation.name.lowercase()}.mp3")
 
-            // 1. Try direct verified Mixkit stock music preview MP3s
-            for (url in directMixkitBgmUrls(situation)) {
-                if (downloadValidAudioToFile(url, dest, minBytes = 8192)) {
+            // 1. Scrape Mixkit Rock, Metal, Fight, and Action stock music libraries and score by combat intensity
+            val categoryUrls = when (situation) {
+                BattleBgmSituation.OPENING_TENSION -> listOf(
+                    "https://mixkit.co/free-stock-music/tag/dramatic/",
+                    "https://mixkit.co/free-stock-music/action/"
+                )
+                BattleBgmSituation.NORMAL_CLASH -> listOf(
+                    "https://mixkit.co/free-stock-music/tag/fight/",
+                    "https://mixkit.co/free-stock-music/action/"
+                )
+                BattleBgmSituation.ULTIMATE_SURGE -> listOf(
+                    "https://mixkit.co/free-stock-music/rock/",
+                    "https://mixkit.co/free-stock-music/metal/"
+                )
+                BattleBgmSituation.CLUTCH_DANGER -> listOf(
+                    "https://mixkit.co/free-stock-music/metal/",
+                    "https://mixkit.co/free-stock-music/tag/fight/"
+                )
+                BattleBgmSituation.NONE -> emptyList()
+            }
+
+            val candidates = categoryUrls
+                .flatMap { scrapeMixkitScoredItems(it) }
+                .distinctBy { it.url }
+                .map { it to scoreBgmCandidate(situation, it.title) }
+                .filter { it.second > 0 }
+                .sortedByDescending { it.second }
+
+            val offset = situation.ordinal % (candidates.size.coerceAtLeast(1))
+            val ordered = if (candidates.isNotEmpty()) {
+                (candidates.drop(offset) + candidates.take(offset)).map { it.first.url }
+            } else {
+                emptyList()
+            }
+
+            for (url in ordered.take(4)) {
+                if (downloadValidAudioToFile(url, dest, minBytes = 16_384, maxBytes = 7_500_000)) {
                     return dest
                 }
             }
 
-            // 2. Scrape live Mixkit stock music category pages (each situation picks a distinct track index)
-            val categoryUrl = when (situation) {
-                BattleBgmSituation.OPENING_TENSION -> "https://mixkit.co/free-stock-music/cinematic/"
-                BattleBgmSituation.NORMAL_CLASH -> "https://mixkit.co/free-stock-music/action/"
-                BattleBgmSituation.ULTIMATE_SURGE -> "https://mixkit.co/free-stock-music/rock/"
-                BattleBgmSituation.CLUTCH_DANGER -> "https://mixkit.co/free-stock-music/trap/"
-                BattleBgmSituation.NONE -> ""
-            }
-            if (categoryUrl.isNotEmpty()) {
-                val tracks = scrapeMixkitMp3Links(categoryUrl)
-                val offset = situation.ordinal % (tracks.size.coerceAtLeast(1))
-                val ordered = if (tracks.isNotEmpty()) {
-                    tracks.drop(offset) + tracks.take(offset)
-                } else {
-                    emptyList()
-                }
-                for (url in ordered.take(4)) {
-                    if (downloadValidAudioToFile(url, dest, minBytes = 8192)) {
-                        return dest
-                    }
-                }
-            }
-
-            // 3. Fallback: Internet Archive battle / rock / action instrumental BGM
+            // 2. Secondary fallback: Internet Archive anime rock / boss fight instrumental BGM
             val archiveQuery = when (situation) {
-                BattleBgmSituation.OPENING_TENSION -> "anime battle intro tension instrumental"
-                BattleBgmSituation.NORMAL_CLASH -> "anime action fight rock bgm"
-                BattleBgmSituation.ULTIMATE_SURGE -> "epic boss battle rock theme"
-                BattleBgmSituation.CLUTCH_DANGER -> "fast intense battle music"
+                BattleBgmSituation.OPENING_TENSION -> "epic dramatic battle intro instrumental"
+                BattleBgmSituation.NORMAL_CLASH -> "fast action rock fight instrumental bgm"
+                BattleBgmSituation.ULTIMATE_SURGE -> "epic heavy metal boss battle rock instrumental"
+                BattleBgmSituation.CLUTCH_DANGER -> "intense final boss battle rock bgm"
                 BattleBgmSituation.NONE -> ""
             }
             if (archiveQuery.isNotEmpty()) {
                 for (url in searchInternetArchiveAudioMp3s(archiveQuery, maxItems = 3)) {
-                    if (downloadValidAudioToFile(url, dest, minBytes = 8192)) {
+                    if (downloadValidAudioToFile(url, dest, minBytes = 16_384, maxBytes = 7_500_000)) {
                         return dest
                     }
                 }
@@ -181,36 +241,33 @@ object RealAudioRepository {
             val safeId = character.id.replace(Regex("[^a-zA-Z0-9_\\-]"), "_")
             val dest = File(File(rootDir(context), "voices").apply { mkdirs() }, "$safeId.mp3")
 
-            // 1. Check curated direct MyInstants official anime voice MP3 URLs for iconic fighters
             for (directUrl in curatedDirectVoiceMp3Urls(character.id)) {
-                if (downloadValidAudioToFile(directUrl, dest, minBytes = 1500)) {
+                if (downloadValidAudioToFile(directUrl, dest, minBytes = 1500, maxBytes = 3_500_000)) {
                     return dest
                 }
             }
 
-            // 2. Scavenge MyInstants & SoundInstants search pages using canon JP/EN Ultimate move queries
             val queries = buildVoiceSearchQueries(character)
             for (query in queries) {
                 val myInstantsHits = searchMyInstantsMp3s(query)
                 for (mp3Url in myInstantsHits.take(3)) {
-                    if (downloadValidAudioToFile(mp3Url, dest, minBytes = 1500)) {
+                    if (downloadValidAudioToFile(mp3Url, dest, minBytes = 1500, maxBytes = 3_500_000)) {
                         return dest
                     }
                 }
 
                 val soundInstantsHits = searchSoundInstantsMp3s(query)
                 for (mp3Url in soundInstantsHits.take(2)) {
-                    if (downloadValidAudioToFile(mp3Url, dest, minBytes = 1500)) {
+                    if (downloadValidAudioToFile(mp3Url, dest, minBytes = 1500, maxBytes = 3_500_000)) {
                         return dest
                     }
                 }
             }
 
-            // 3. Scavenge Internet Archive anime voice clips
             for (query in queries.take(2)) {
                 val archiveHits = searchInternetArchiveAudioMp3s("$query anime voice", maxItems = 2)
                 for (mp3Url in archiveHits) {
-                    if (downloadValidAudioToFile(mp3Url, dest, minBytes = 1500)) {
+                    if (downloadValidAudioToFile(mp3Url, dest, minBytes = 1500, maxBytes = 3_500_000)) {
                         return dest
                     }
                 }
@@ -222,71 +279,82 @@ object RealAudioRepository {
         }
     }
 
-    private fun directMixkitSfxUrls(sfx: GameSfx): List<String> = when (sfx) {
-        GameSfx.WALL_BOUNCE -> listOf(
-            "https://assets.mixkit.co/active_storage/sfx/238/238-preview.mp3",
-            "https://assets.mixkit.co/active_storage/sfx/2571/2571-preview.mp3"
-        )
+    /**
+     * Only includes Mixkit SFX IDs whose exact combat sound titles are verified:
+     * - 2047: Martial arts fast punch
+     * - 2789: Samurai sword impact
+     * - 2792: Fast sword whoosh
+     * - 2571: Select click
+     */
+    private fun verifiedMixkitSfxUrls(sfx: GameSfx): List<String> = when (sfx) {
         GameSfx.BALL_CLASH -> listOf(
-            "https://assets.mixkit.co/active_storage/sfx/2155/2155-preview.mp3",
-            "https://assets.mixkit.co/active_storage/sfx/2151/2151-preview.mp3"
+            "https://assets.mixkit.co/active_storage/sfx/2047/2047-preview.mp3"
         )
         GameSfx.CRIT_CLASH -> listOf(
-            "https://assets.mixkit.co/active_storage/sfx/2198/2198-preview.mp3",
-            "https://assets.mixkit.co/active_storage/sfx/2127/2127-preview.mp3"
-        )
-        GameSfx.PASSIVE_TRIGGER -> listOf(
-            "https://assets.mixkit.co/active_storage/sfx/2592/2592-preview.mp3",
-            "https://assets.mixkit.co/active_storage/sfx/2588/2588-preview.mp3"
+            "https://assets.mixkit.co/active_storage/sfx/2789/2789-preview.mp3"
         )
         GameSfx.REDIRECT_DASH -> listOf(
-            "https://assets.mixkit.co/active_storage/sfx/2043/2043-preview.mp3",
-            "https://assets.mixkit.co/active_storage/sfx/2044/2044-preview.mp3"
-        )
-        GameSfx.COUNTER_PARRY -> listOf(
-            "https://assets.mixkit.co/active_storage/sfx/1330/1330-preview.mp3",
-            "https://assets.mixkit.co/active_storage/sfx/2791/2791-preview.mp3"
-        )
-        GameSfx.AWAKENING_PLAYER -> listOf(
-            "https://assets.mixkit.co/active_storage/sfx/2600/2600-preview.mp3",
-            "https://assets.mixkit.co/active_storage/sfx/2589/2589-preview.mp3"
-        )
-        GameSfx.AWAKENING_AI -> listOf(
-            "https://assets.mixkit.co/active_storage/sfx/2590/2590-preview.mp3",
-            "https://assets.mixkit.co/active_storage/sfx/2600/2600-preview.mp3"
-        )
-        GameSfx.KNOCKOUT_FINISH -> listOf(
-            "https://assets.mixkit.co/active_storage/sfx/3004/3004-preview.mp3",
-            "https://assets.mixkit.co/active_storage/sfx/1684/1684-preview.mp3"
-        )
-        GameSfx.UPGRADE_FORGE -> listOf(
-            "https://assets.mixkit.co/active_storage/sfx/2003/2003-preview.mp3",
-            "https://assets.mixkit.co/active_storage/sfx/2019/2019-preview.mp3"
+            "https://assets.mixkit.co/active_storage/sfx/2792/2792-preview.mp3"
         )
         GameSfx.UI_TAP -> listOf(
-            "https://assets.mixkit.co/active_storage/sfx/2568/2568-preview.mp3",
-            "https://assets.mixkit.co/active_storage/sfx/961/961-preview.mp3"
+            "https://assets.mixkit.co/active_storage/sfx/2571/2571-preview.mp3"
         )
+        else -> emptyList()
     }
 
-    private fun directMixkitBgmUrls(situation: BattleBgmSituation): List<String> = when (situation) {
-        BattleBgmSituation.OPENING_TENSION -> listOf(
-            "https://assets.mixkit.co/music/preview/mixkit-hazy-after-hours-132.mp3",
-            "https://assets.mixkit.co/music/preview/mixkit-deep-urban-623.mp3"
-        )
-        BattleBgmSituation.NORMAL_CLASH -> listOf(
-            "https://assets.mixkit.co/music/preview/mixkit-tech-house-vibes-130.mp3",
-            "https://assets.mixkit.co/music/preview/mixkit-games-worldbeat-466.mp3"
-        )
-        BattleBgmSituation.ULTIMATE_SURGE -> listOf(
-            "https://assets.mixkit.co/music/preview/mixkit-cyberpunk-city-8-bit-607.mp3",
-            "https://assets.mixkit.co/music/preview/mixkit-driving-ambition-32.mp3"
-        )
-        BattleBgmSituation.CLUTCH_DANGER -> listOf(
-            "https://assets.mixkit.co/music/preview/mixkit-happy-party-152.mp3",
-            "https://assets.mixkit.co/music/preview/mixkit-hip-hop-02-738.mp3"
-        )
-        BattleBgmSituation.NONE -> emptyList()
+    private val BANNED_SFX_WORDS = listOf(
+        "groan", "moan", "scream", "voice", "human", "ouch", "cry", "laugh",
+        "cartoon", "funny", "comedy", "fart", "boing", "fail", "lose", "game over",
+        "sad", "dog", "cat", "bird", "animal", "crowd", "applause", "cheer",
+        "camera", "shutter", "typewriter", "keyboard", "mouse", "loop", "ambience",
+        "ambient", "drone", "horror", "zombie", "monster", "footstep", "coin", "8-bit"
+    )
+
+    private fun scoreSfxCandidate(sfx: GameSfx, rawTitle: String): Int {
+        val t = rawTitle.lowercase()
+        if (BANNED_SFX_WORDS.any { t.contains(it) }) return -100
+
+        var score = 10
+        val preferred = when (sfx) {
+            GameSfx.WALL_BOUNCE -> listOf("ball", "bounce", "tap", "thud", "impact", "quick", "short")
+            GameSfx.BALL_CLASH -> listOf("martial arts", "punch", "body hit", "impact", "fast", "strike", "boxer")
+            GameSfx.CRIT_CLASH -> listOf("samurai", "sword", "heavy", "impact", "smash", "strike", "blade")
+            GameSfx.REDIRECT_DASH -> listOf("fast", "whoosh", "swish", "air", "swift", "wind", "sword whoosh")
+            GameSfx.COUNTER_PARRY -> listOf("sword", "blade", "metal", "clang", "strike", "clash", "steel", "dagger")
+            GameSfx.PASSIVE_TRIGGER -> listOf("magic", "sparkle", "shimmer", "spell", "chime", "sweep", "shine")
+            GameSfx.AWAKENING_PLAYER, GameSfx.AWAKENING_AI -> listOf("electricity", "lightning", "power", "energy", "surge", "magic", "blast")
+            GameSfx.KNOCKOUT_FINISH -> listOf("explosion", "boom", "epic", "impact", "blast", "hit", "thunder")
+            GameSfx.UPGRADE_FORGE -> listOf("win", "chime", "bonus", "unlock", "level", "achievement", "crystal")
+            GameSfx.UI_TAP -> listOf("modern", "select", "click", "interface", "ui", "button", "tap", "soft")
+        }
+        preferred.forEach { kw ->
+            if (t.contains(kw)) score += 18
+        }
+        return score
+    }
+
+    private val BANNED_BGM_WORDS = listOf(
+        "happy", "party", "jazz", "lounge", "chill", "hazy", "relax", "sleep",
+        "lullaby", "romantic", "wedding", "christmas", "holiday", "ukulele",
+        "corporate", "podcast", "sunny", "beach", "comedy", "funny", "kids", "piano"
+    )
+
+    private fun scoreBgmCandidate(situation: BattleBgmSituation, rawTitle: String): Int {
+        val t = rawTitle.lowercase()
+        if (BANNED_BGM_WORDS.any { t.contains(it) }) return -100
+
+        var score = 10
+        val preferred = when (situation) {
+            BattleBgmSituation.OPENING_TENSION -> listOf("dramatic", "epic", "tension", "dark", "cinematic", "drums", "battle", "intro")
+            BattleBgmSituation.NORMAL_CLASH -> listOf("brawl", "fight", "action", "hit the gas", "rock", "chase", "energetic", "combat")
+            BattleBgmSituation.ULTIMATE_SURGE -> listOf("metal", "rock", "heavy", "guitar", "power", "aggressive", "adrenaline", "epic")
+            BattleBgmSituation.CLUTCH_DANGER -> listOf("metal", "fury", "intense", "fast", "fight", "storm", "danger", "boss", "strike")
+            BattleBgmSituation.NONE -> emptyList()
+        }
+        preferred.forEach { kw ->
+            if (t.contains(kw)) score += 20
+        }
+        return score
     }
 
     private fun curatedDirectVoiceMp3Urls(charId: String): List<String> = when (charId) {
@@ -396,15 +464,30 @@ object RealAudioRepository {
             .toList()
     }
 
-    private fun scrapeMixkitMp3Links(pageUrl: String): List<String> {
+    private fun scrapeMixkitScoredItems(pageUrl: String): List<ScoredAudioCandidate> {
         scrapedCategoryCache[pageUrl]?.let { return it }
         val html = fetchText(pageUrl) ?: return emptyList()
-        val regex = Regex("""https://assets\.mixkit\.co/[A-Za-z0-9_./\-]+\.mp3""")
-        val found = regex.findAll(html).map { it.value }.distinct().toList()
-        if (found.isNotEmpty()) {
-            scrapedCategoryCache[pageUrl] = found
+        val urlRegex = Regex("""https://assets\.mixkit\.co/[A-Za-z0-9_./\-]+\.mp3""")
+        val tagStripRegex = Regex("""<[^>]+>""")
+        val results = ArrayList<ScoredAudioCandidate>()
+
+        for (match in urlRegex.findAll(html)) {
+            val mp3Url = match.value
+            val windowStart = (match.range.first - 650).coerceAtLeast(0)
+            val windowEnd = (match.range.last + 650).coerceAtMost(html.length)
+            val snippet = html.substring(windowStart, windowEnd)
+                .replace(tagStripRegex, " ")
+                .replace(Regex("""\s+"""), " ")
+                .trim()
+            val urlSlug = mp3Url.substringAfterLast('/').substringBeforeLast('.')
+            results.add(ScoredAudioCandidate(title = "$urlSlug $snippet", url = mp3Url))
         }
-        return found
+
+        val deduped = results.distinctBy { it.url }
+        if (deduped.isNotEmpty()) {
+            scrapedCategoryCache[pageUrl] = deduped
+        }
+        return deduped
     }
 
     private fun searchInternetArchiveAudioMp3s(query: String, maxItems: Int): List<String> {
@@ -445,7 +528,7 @@ object RealAudioRepository {
                 val sb = StringBuilder()
                 val buf = CharArray(4096)
                 var total = 0
-                while (total < 260_000) {
+                while (total < 280_000) {
                     val n = reader.read(buf)
                     if (n <= 0) break
                     sb.append(buf, 0, n)
@@ -463,7 +546,12 @@ object RealAudioRepository {
         }
     }
 
-    private fun downloadValidAudioToFile(urlString: String, destFile: File, minBytes: Int): Boolean {
+    private fun downloadValidAudioToFile(
+        urlString: String,
+        destFile: File,
+        minBytes: Int,
+        maxBytes: Int
+    ): Boolean {
         var conn: HttpURLConnection? = null
         val tmpFile = File(destFile.parentFile, "${destFile.name}.tmp_${System.nanoTime()}")
         return try {
@@ -480,10 +568,15 @@ object RealAudioRepository {
             if (contentType.contains("text/html") || contentType.contains("application/xhtml")) {
                 return false
             }
+            val declaredLen = conn.contentLength
+            if (declaredLen > maxBytes) {
+                return false
+            }
 
             var totalBytes = 0
             val header = ByteArray(16)
             var headerFilled = 0
+            var exceededCap = false
 
             conn.inputStream.use { input ->
                 FileOutputStream(tmpFile).use { output ->
@@ -496,15 +589,17 @@ object RealAudioRepository {
                             System.arraycopy(buffer, 0, header, headerFilled, copyLen)
                             headerFilled += copyLen
                         }
-                        output.write(buffer, 0, read)
                         totalBytes += read
-                        // Cap single clip download at 8 MB for safety & speed
-                        if (totalBytes > 8 * 1024 * 1024) break
+                        if (totalBytes > maxBytes) {
+                            exceededCap = true
+                            break
+                        }
+                        output.write(buffer, 0, read)
                     }
                 }
             }
 
-            if (totalBytes < minBytes || !isValidAudioHeader(header, headerFilled)) {
+            if (exceededCap || totalBytes < minBytes || !isValidAudioHeader(header, headerFilled)) {
                 tmpFile.delete()
                 return false
             }
@@ -536,20 +631,12 @@ object RealAudioRepository {
         val b2 = header[2].toInt() and 0xFF
         val b3 = header[3].toInt() and 0xFF
 
-        // Reject HTML ("<!DO", "<htm", "<HTM", "<?xm", "{")
         if (b0 == '<'.code || b0 == '{'.code) return false
-
-        // "ID3" tag for MP3
         if (b0 == 'I'.code && b1 == 'D'.code && b2 == '3'.code) return true
-        // Raw MPEG audio frame sync (0xFFE0..0xFFFF)
         if (b0 == 0xFF && (b1 and 0xE0) == 0xE0) return true
-        // "OggS" for OGG Vorbis / Opus
         if (b0 == 'O'.code && b1 == 'g'.code && b2 == 'g'.code && b3 == 'S'.code) return true
-        // "RIFF" for WAV
         if (b0 == 'R'.code && b1 == 'I'.code && b2 == 'F'.code && b3 == 'F'.code) return true
-        // "fLaC" for FLAC
         if (b0 == 'f'.code && b1 == 'L'.code && b2 == 'a'.code && b3 == 'C'.code) return true
-        // MP4/M4A "ftyp" at offset 4
         if (len >= 8 &&
             header[4].toInt().toChar() == 'f' &&
             header[5].toInt().toChar() == 't' &&

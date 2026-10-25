@@ -75,10 +75,27 @@ class ExampleRobolectricTest {
         assertTrue(vm.navigateBack())
         assertEquals(AppScreen.HOME_HUB, vm.currentScreen.value)
 
-        // Daily quests & music toggle work cleanly
+        // Daily quests & separated audio toggles (Game Music, Sound Effects, Voice Lines) work independently
         assertEquals(4, vm.dailyQuests.value.size)
+
         val initialMusic = vm.engineSettings.value.musicEnabled
+        val initialSfx = vm.engineSettings.value.sfxEnabled
+        val initialVoice = vm.engineSettings.value.voiceLinesEnabled
+
         vm.toggleMusic()
         assertEquals(!initialMusic, vm.engineSettings.value.musicEnabled)
+        assertEquals(initialSfx, vm.engineSettings.value.sfxEnabled)
+        assertEquals(initialVoice, vm.engineSettings.value.voiceLinesEnabled)
+
+        vm.toggleSfx()
+        assertEquals(!initialSfx, vm.engineSettings.value.sfxEnabled)
+        assertEquals(!initialSfx, vm.soundManager.isEnabled)
+        assertEquals(initialVoice, vm.engineSettings.value.voiceLinesEnabled)
+        assertEquals(initialVoice, vm.battleAudioDirector.voiceLinesEnabled)
+
+        vm.toggleVoiceLines()
+        assertEquals(!initialVoice, vm.engineSettings.value.voiceLinesEnabled)
+        assertEquals(!initialVoice, vm.battleAudioDirector.voiceLinesEnabled)
+        assertEquals(!initialSfx, vm.soundManager.isEnabled)
     }
 }

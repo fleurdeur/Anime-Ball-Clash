@@ -225,7 +225,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
 
     init {
         soundManager.isEnabled = _engineSettings.value.sfxEnabled
-        battleAudioDirector.sfxEnabled = _engineSettings.value.sfxEnabled
+        battleAudioDirector.voiceLinesEnabled = _engineSettings.value.voiceLinesEnabled
         battleAudioDirector.musicEnabled = _engineSettings.value.musicEnabled
         battleAudioDirector.prefetchCharacterVoices(
             CharacterRoster.getById(_playerProfile.value.selectedCharacterId),
@@ -995,7 +995,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         val synced = newSettings.copy(bloomPostFx = newSettings.renderMode.bloomGlow)
         _engineSettings.value = synced
         soundManager.isEnabled = synced.sfxEnabled
-        battleAudioDirector.sfxEnabled = synced.sfxEnabled
+        battleAudioDirector.voiceLinesEnabled = synced.voiceLinesEnabled
         battleAudioDirector.musicEnabled = synced.musicEnabled
         _battleSim.value?.engineSettings = synced
         persistEngineSettings(synced)
@@ -1014,6 +1014,13 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     fun toggleMusic() {
         val next = !_engineSettings.value.musicEnabled
         val updated = _engineSettings.value.copy(musicEnabled = next)
+        updateEngineSettings(updated)
+        soundManager.playUiTap()
+    }
+
+    fun toggleVoiceLines() {
+        val next = !_engineSettings.value.voiceLinesEnabled
+        val updated = _engineSettings.value.copy(voiceLinesEnabled = next)
         updateEngineSettings(updated)
         soundManager.playUiTap()
     }
@@ -1976,8 +1983,9 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         val renderStr = prefs.getString("render_mode", RenderMode.BALANCED.name) ?: RenderMode.BALANCED.name
         val meshStr = prefs.getString("physics_mesh", PhysicsMesh.DYNAMIC.name) ?: PhysicsMesh.DYNAMIC.name
         val fpsStr = prefs.getString("target_fps", TargetFPS.FPS_60.name) ?: TargetFPS.FPS_60.name
-        val sfx = prefs.getBoolean("sfx_enabled", true)
         val music = prefs.getBoolean("music_enabled", true)
+        val sfx = prefs.getBoolean("sfx_enabled", true)
+        val voiceLines = prefs.getBoolean("voice_lines_enabled", true)
         val haptics = prefs.getBoolean("haptics_enabled", true)
         val shake = prefs.getBoolean("screen_shake", true)
 
@@ -1991,8 +1999,9 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
             renderMode = render,
             physicsMesh = mesh,
             targetFps = fps,
-            sfxEnabled = sfx,
             musicEnabled = music,
+            sfxEnabled = sfx,
+            voiceLinesEnabled = voiceLines,
             hapticsEnabled = haptics,
             bloomPostFx = render.bloomGlow,
             screenShake = shake
@@ -2005,8 +2014,9 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
             .putString("render_mode", settings.renderMode.name)
             .putString("physics_mesh", settings.physicsMesh.name)
             .putString("target_fps", settings.targetFps.name)
-            .putBoolean("sfx_enabled", settings.sfxEnabled)
             .putBoolean("music_enabled", settings.musicEnabled)
+            .putBoolean("sfx_enabled", settings.sfxEnabled)
+            .putBoolean("voice_lines_enabled", settings.voiceLinesEnabled)
             .putBoolean("haptics_enabled", settings.hapticsEnabled)
             .putBoolean("screen_shake", settings.screenShake)
             .apply()

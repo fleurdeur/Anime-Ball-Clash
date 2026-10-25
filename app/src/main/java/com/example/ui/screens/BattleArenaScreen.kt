@@ -35,12 +35,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.outlined.VolumeOff
-import androidx.compose.material.icons.automirrored.outlined.VolumeUp
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.MusicNote
-import androidx.compose.material.icons.filled.MusicOff
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material3.Button
@@ -298,16 +294,12 @@ fun BattleArenaScreen(
                 }
             }
 
-            // 3. Bottom Combat Bar: Sound, Music (when space permits), Auto-Counter Status, Ultimate Ability
+            // 3. Bottom Combat Bar: Only Ultimate Button below in game
             ArenaCompactBottomBar(
                 ultimateName = simulation.playerBall.character.ultimateName,
                 hudState = hudState,
-                sfxEnabled = engineSettings.sfxEnabled,
-                musicEnabled = engineSettings.musicEnabled,
                 isCompactWidth = isCompactWidth,
                 palette = palette,
-                onToggleSfx = onToggleSfx,
-                onToggleMusic = onToggleMusic,
                 onTriggerUltimate = onTriggerUltimate
             )
         }
@@ -831,12 +823,8 @@ private fun ArenaCourtCanvas(
 private fun ArenaCompactBottomBar(
     ultimateName: String,
     hudState: BattleHudState,
-    sfxEnabled: Boolean,
-    musicEnabled: Boolean,
     isCompactWidth: Boolean,
     palette: AppPalette,
-    onToggleSfx: () -> Unit,
-    onToggleMusic: () -> Unit,
     onTriggerUltimate: () -> Unit
 ) {
     val isPlayerUltOnCd = hudState.playerUltCooldownHalfSecs > 0
@@ -851,7 +839,7 @@ private fun ArenaCompactBottomBar(
     val pulseTransition = rememberInfiniteTransition(label = "ult_ready_pulse")
     val readyScale by pulseTransition.animateFloat(
         initialValue = 1.0f,
-        targetValue = 1.025f,
+        targetValue = 1.022f,
         animationSpec = infiniteRepeatable(
             animation = tween(durationMillis = 520, easing = FastOutSlowInEasing),
             repeatMode = RepeatMode.Reverse
@@ -859,146 +847,96 @@ private fun ArenaCompactBottomBar(
         label = "readyScale"
     )
 
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        // Sound toggle (48dp touch target)
-        Surface(
-            color = palette.cardSurface,
-            shape = RoundedCornerShape(12.dp),
-            border = BorderStroke(1.dp, palette.border),
-            modifier = Modifier.size(48.dp)
-        ) {
-            IconButton(
-                onClick = onToggleSfx,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .testTag("arena_sfx_toggle_button")
-            ) {
-                Icon(
-                    imageVector = if (sfxEnabled) Icons.AutoMirrored.Outlined.VolumeUp else Icons.AutoMirrored.Outlined.VolumeOff,
-                    contentDescription = if (sfxEnabled) "Mute Sound" else "Turn On Sound",
-                    tint = if (sfxEnabled) palette.blueAccent else palette.textMuted,
-                    modifier = Modifier.size(19.dp)
-                )
-            }
-        }
-
-        // Music toggle (48dp touch target)
-        Surface(
-            color = palette.cardSurface,
-            shape = RoundedCornerShape(12.dp),
-            border = BorderStroke(1.dp, palette.border),
-            modifier = Modifier.size(48.dp)
-        ) {
-            IconButton(
-                onClick = onToggleMusic,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .testTag("arena_music_toggle_button")
-            ) {
-                Icon(
-                    imageVector = if (musicEnabled) Icons.Default.MusicNote else Icons.Default.MusicOff,
-                    contentDescription = if (musicEnabled) "Mute Fight Music" else "Play Fight Music",
-                    tint = if (musicEnabled) palette.goldAccent else palette.textMuted,
-                    modifier = Modifier.size(19.dp)
-                )
-            }
-        }
-
-        // Full-width Ultimate Button (48dp height — Counter bar removed; double-tapping court also fires Ultimate!)
-        Surface(
-            onClick = { if (ultReady) onTriggerUltimate() },
-            enabled = ultReady,
-            shape = RoundedCornerShape(12.dp),
-            color = when {
-                hudState.isPlayerUltActive -> palette.goldAccentSoft
+    // Strictly ONLY the Ultimate Button below in game
+    Surface(
+        onClick = { if (ultReady) onTriggerUltimate() },
+        enabled = ultReady,
+        shape = RoundedCornerShape(14.dp),
+        color = when {
+            hudState.isPlayerUltActive -> palette.goldAccentSoft
+            ultReady -> palette.primaryAccent
+            else -> palette.cardSurface
+        },
+        border = BorderStroke(
+            1.dp,
+            when {
+                hudState.isPlayerUltActive -> palette.goldAccent
                 ultReady -> palette.primaryAccent
-                else -> palette.cardSurface
-            },
-            border = BorderStroke(
-                1.dp,
-                when {
-                    hudState.isPlayerUltActive -> palette.goldAccent
-                    ultReady -> palette.primaryAccent
-                    else -> palette.border
-                }
-            ),
+                else -> palette.border
+            }
+        ),
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(50.dp)
+            .graphicsLayer {
+                val s = if (ultReady) readyScale else 1f
+                scaleX = s
+                scaleY = s
+            }
+            .testTag("ultimate_awaken_button")
+    ) {
+        Column(
             modifier = Modifier
-                .weight(1f)
-                .height(48.dp)
-                .graphicsLayer {
-                    val s = if (ultReady) readyScale else 1f
-                    scaleX = s
-                    scaleY = s
-                }
-                .testTag("ultimate_awaken_button")
+                .fillMaxSize()
+                .padding(horizontal = 12.dp, vertical = 6.dp),
+            verticalArrangement = Arrangement.SpaceBetween
         ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(horizontal = 10.dp, vertical = 6.dp),
-                verticalArrangement = Arrangement.SpaceBetween
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center,
+                modifier = Modifier.fillMaxWidth()
             ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.Center,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Icon(
-                        Icons.Default.Bolt,
-                        contentDescription = null,
-                        tint = when {
-                            ultReady -> Color.White
-                            hudState.isPlayerUltActive -> palette.goldAccent
-                            isPlayerUltOnCd -> palette.textMuted
-                            else -> palette.goldAccent
-                        },
-                        modifier = Modifier.size(15.dp)
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(
-                        text = when {
-                            hudState.isPlayerUltActive && hudState.multiDashCharges > 0 ->
-                                "ULT ${hudState.playerUltActiveHalfSecs / 2f}s • ${hudState.multiDashCharges}x DASH"
-                            hudState.isPlayerUltActive ->
-                                "ULT ${hudState.playerUltActiveHalfSecs / 2f}s"
-                            isPlayerUltOnCd ->
-                                "Wait ${hudState.playerUltCooldownHalfSecs / 2f}s"
-                            ultReady ->
-                                if (isCompactWidth) "ULT: $ultimateName (2x Tap!)" else "ULT: $ultimateName • Tap or 2x Tap!"
-                            else ->
-                                "Ult ${hudState.playerUltPercent}% (2x Tap Ready)"
-                        },
-                        style = MaterialTheme.typography.labelMedium,
-                        color = when {
-                            ultReady -> Color.White
-                            hudState.isPlayerUltActive -> palette.goldAccent
-                            isPlayerUltOnCd -> palette.textSecondary
-                            else -> palette.textPrimary
-                        },
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-
-                LinearProgressIndicator(
-                    progress = { ultProgress },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(4.dp)
-                        .clip(RoundedCornerShape(50)),
-                    color = when {
+                Icon(
+                    Icons.Default.Bolt,
+                    contentDescription = null,
+                    tint = when {
                         ultReady -> Color.White
                         hudState.isPlayerUltActive -> palette.goldAccent
                         isPlayerUltOnCd -> palette.textMuted
-                        else -> palette.blueAccent
+                        else -> palette.goldAccent
                     },
-                    trackColor = if (ultReady) Color.White.copy(alpha = 0.28f) else palette.elevatedSurface
+                    modifier = Modifier.size(16.dp)
+                )
+                Spacer(modifier = Modifier.width(5.dp))
+                Text(
+                    text = when {
+                        hudState.isPlayerUltActive && hudState.multiDashCharges > 0 ->
+                            "ULT ${hudState.playerUltActiveHalfSecs / 2f}s • ${hudState.multiDashCharges}x DASH"
+                        hudState.isPlayerUltActive ->
+                            "ULT ${hudState.playerUltActiveHalfSecs / 2f}s"
+                        isPlayerUltOnCd ->
+                            "Ultimate Wait ${hudState.playerUltCooldownHalfSecs / 2f}s"
+                        ultReady ->
+                            if (isCompactWidth) "ULTIMATE: $ultimateName" else "ULTIMATE: $ultimateName • Tap or 2x Tap!"
+                        else ->
+                            "Ultimate ${hudState.playerUltPercent}% (2x Tap Ready)"
+                    },
+                    style = MaterialTheme.typography.labelLarge,
+                    color = when {
+                        ultReady -> Color.White
+                        hudState.isPlayerUltActive -> palette.goldAccent
+                        isPlayerUltOnCd -> palette.textSecondary
+                        else -> palette.textPrimary
+                    },
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
+
+            LinearProgressIndicator(
+                progress = { ultProgress },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(4.dp)
+                    .clip(RoundedCornerShape(50)),
+                color = when {
+                    ultReady -> Color.White
+                    hudState.isPlayerUltActive -> palette.goldAccent
+                    isPlayerUltOnCd -> palette.textMuted
+                    else -> palette.blueAccent
+                },
+                trackColor = if (ultReady) Color.White.copy(alpha = 0.28f) else palette.elevatedSurface
+            )
         }
     }
 }
