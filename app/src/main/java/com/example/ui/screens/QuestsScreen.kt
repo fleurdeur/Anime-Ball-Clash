@@ -3,10 +3,14 @@ package com.example.ui.screens
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
@@ -198,13 +202,24 @@ fun QuestsScreen(
                 }
 
                 AnimatedContent(
-                    targetState = activeList,
+                    targetState = selectedTab,
                     transitionSpec = {
-                        fadeIn(tween(180)) togetherWith fadeOut(tween(130))
+                        val dir = if (targetState > initialState) 1 else -1
+                        (slideInHorizontally(
+                            animationSpec = spring(
+                                dampingRatio = Spring.DampingRatioNoBouncy,
+                                stiffness = Spring.StiffnessMediumLow
+                            ),
+                            initialOffsetX = { fullWidth -> (fullWidth * 0.18f * dir).toInt() }
+                        ) + fadeIn(tween(180))) togetherWith (slideOutHorizontally(
+                            animationSpec = tween(150),
+                            targetOffsetX = { fullWidth -> -(fullWidth * 0.14f * dir).toInt() }
+                        ) + fadeOut(tween(130)))
                     },
                     label = "quest_tab_list_anim",
                     modifier = Modifier.weight(1f)
-                ) { currentQuests ->
+                ) { tabIdx ->
+                    val currentQuests = if (tabIdx == 0 && dailyQuests.isNotEmpty()) dailyQuests else quests
                     LazyColumn(
                         contentPadding = PaddingValues(bottom = 20.dp),
                         verticalArrangement = Arrangement.spacedBy(10.dp),

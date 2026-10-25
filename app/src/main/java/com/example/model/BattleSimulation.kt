@@ -142,16 +142,20 @@ class BattleSimulation(
                 mult *= (1f + min(6, ball.kamuiBounceStacks) * 0.05f)
             }
         }
-        return baseArenaSpeed * mult.coerceIn(0.78f, 2.55f)
+        return baseArenaSpeed * mult.coerceIn(0.55f, 2.95f)
     }
 
     /**
      * Starts the nonstop clash: launches BOTH the player's sphere and the opponent's sphere.
-     * In remote multiplayer (LAN / Online Room / Ranked), launches with deterministic mirrored vector
-     * until remote peer sends their exact opening/dash vectors.
+     * Launch speed scales directly with how far the player stretched the slingshot pull.
      */
-    fun startNonstopClash(playerDirection: Vector2, difficulty: BotDifficulty) {
+    fun startNonstopClash(
+        playerDirection: Vector2,
+        difficulty: BotDifficulty,
+        stretchRatio: Float = 0.75f
+    ) {
         activeBotDifficulty = difficulty
+        val clampedStretch = stretchRatio.coerceIn(0.15f, 1.0f)
         val pDir = sanitizeLaunchAngle(
             if (playerDirection.length() > 0.01f) playerDirection.normalized()
             else Vector2(0.42f, -0.91f).normalized()
@@ -167,8 +171,10 @@ class BattleSimulation(
         aiRedirectCooldown = (difficulty.redirectCooldownSec - opponentBall.upgrades.redirectCooldownReduction())
             .coerceAtLeast(1.15f) * 0.68f
 
-        applyImpulseLaunch(playerBall, pDir, 1.0f)
-        applyImpulseLaunch(opponentBall, oppDir, if (isRemoteMultiplayer) 1.0f else difficulty.speedFactor)
+        playerBall.speedBoostMultiplier = 0.62f + clampedStretch * 1.18f
+        playerBall.speedBoostTimer = 0.90f
+        applyImpulseLaunch(playerBall, pDir, 1.0f, clampedStretch)
+        applyImpulseLaunch(opponentBall, oppDir, if (isRemoteMultiplayer) 1.0f else difficulty.speedFactor, 0.75f)
     }
 
     fun applyRemoteOpponentCommand(mirroredDir: Vector2, isOpening: Boolean) {
@@ -345,23 +351,47 @@ class BattleSimulation(
         applyImpulseLaunch(opponentBall, dir, powerRatio.coerceIn(0.75f, 1.25f))
     }
 
-    fun redirectPlayerBall(direction: Vector2): Boolean {
+    fun redirectPlayerBall(direction: Vector2, stretchRatio: Float = 0.75f): Boolean {
         if (!isClashStarted || !isRoundActive || playerRedirectCooldown > 0f || playerBall.isStunned) {
             return false
         }
         val dir = sanitizeLaunchAngle(direction.normalized())
         if (dir.length() < 0.01f) return false
 
-        playerRedirectCooldown = playerBall.effectiveRedirectCooldownSec
-        playerBall.speedBoostMultiplier = if (playerBall.isUltimateActive) 1.36f else 1.26f
-        playerBall.speedBoostTimer = if (playerBall.isUltimateActive) 0.72f else 0.65f
-        applyImpulseLaunch(playerBall, dir, 1.0f)
+        val clampedStretch = stretchRatio.coerceIn(0.15f, 1.0f)
+        val usedMultiDash = playerBall.isUltimateActive && playerBall.multiDashChargesRemaining > 0
+        if (usedMultiDash) {
+            playerBall.multiDashChargesRemaining = max(0, playerBall.multiDashChargesRemaining - 1)
+            playerRedirectCooldown = if (playerBall.multiDashChargesRemaining > 0) {
+                0.24f
+            } else {
+                (3.0f - playerBall.upgrades.redirectCooldownReduction()).coerceAtLeast(1.65f)
+            }
+        } else {
+            playerRedirectCooldown = playerBall.effectiveRedirectCooldownSec
+        }
+
+        val ultSpeedBonus = if (usedMultiDash || playerBall.isUltimateActive) 1.12f else 1.0f
+        playerBall.speedBoostMultiplier = (0.62f + clampedStretch * 1.18f) * ultSpeedBonus
+        playerBall.speedBoostTimer = 0.92f
+        applyImpulseLaunch(playerBall, dir, 1.0f, clampedStretch)
+
+        val dashLabel = when {
+            usedMultiDash && playerBall.multiDashChargesRemaining > 0 ->
+                "MULTI-DASH (${playerBall.multiDashChargesRemaining} LEFT)!"
+            usedMultiDash ->
+                "FINAL MULTI-DASH!"
+            clampedStretch >= 0.88f ->
+                "MAX DASH!"
+            else ->
+                "DASH!"
+        }
         spawnFloatingText(
-            if (playerBall.isUltimateActive) "MULTI-DASH!" else "DASH!",
+            dashLabel,
             playerBall.position.x,
             playerBall.position.y - playerBall.radius * 1.15f,
-            if (playerBall.isUltimateActive) Color(0xFFFACC15) else Color(0xFF38BDF8),
-            isCrit = playerBall.isUltimateActive
+            if (usedMultiDash || clampedStretch >= 0.88f) Color(0xFFFACC15) else Color(0xFF38BDF8),
+            isCrit = usedMultiDash || clampedStretch >= 0.88f
         )
         onRedirectUsed(true)
         return true
@@ -443,21 +473,41 @@ class BattleSimulation(
         }
         if (!defender.canActivateCounter) return false
 
-        var chance = defender.effectiveAutoCounterChance
+        var chance = defender.effectiveAutoCounterChance * (0.82f + rng.nextFloat() * 0.38f)
         if (!isRemoteMultiplayer && activeBotDifficulty == BotDifficulty.EASY) {
-            chance = if (isPlayerDefender) (chance + 0.06f).coerceAtMost(0.52f) else chance * 0.32f
+            chance = if (isPlayerDefender) (chance + 0.06f).coerceAtMost(0.54f) else chance * 0.32f
         }
         if (rng.nextFloat() >= chance) return false
 
-        onCounterActivated(isPlayerDefender, defender.character.counterArchetype.simpleName)
+        val chosenArchetype = pickRandomCounterArchetype(defender.character)
+        onCounterActivated(isPlayerDefender, chosenArchetype.simpleName)
         resolveCounterPayoff(
             counterBall = defender,
             attackerBall = attacker,
             blockedDamage = incomingDamage,
             isPlayerCountering = isPlayerDefender,
-            attackerFacingOverride = attackerFacingOverride
+            attackerFacingOverride = attackerFacingOverride,
+            overrideArchetype = chosenArchetype
         )
         return true
+    }
+
+    private fun pickRandomCounterArchetype(character: CharacterData): CounterArchetype {
+        val base = character.counterArchetype
+        // Preserve iconic canon counters for signature characters while randomizing generic counter styles
+        if (base != CounterArchetype.GUARD_PARRY && base != CounterArchetype.SHADOW_DODGE) {
+            return base
+        }
+        val pool = arrayOf(
+            base,
+            base,
+            CounterArchetype.GUARD_PARRY,
+            CounterArchetype.SHADOW_DODGE,
+            CounterArchetype.VECTOR_REFLECT_COUNTER,
+            CounterArchetype.TELEPORT_STRIKE,
+            CounterArchetype.TITAN_ARMOR_COUNTER
+        )
+        return pool[rng.nextInt(pool.size)]
     }
 
     /**
@@ -672,15 +722,21 @@ class BattleSimulation(
         return Vector2(px.coerceIn(wallLeft, wallRight), py.coerceIn(wallTop, wallBottom))
     }
 
-    private fun applyImpulseLaunch(ball: CombatBall, dir: Vector2, speedScale: Float) {
+    private fun applyImpulseLaunch(
+        ball: CombatBall,
+        dir: Vector2,
+        speedScale: Float,
+        stretchVisualRatio: Float = 0.75f
+    ) {
+        val s = stretchVisualRatio.coerceIn(0.15f, 1.0f)
         val targetSpeed = computeTargetCruiseSpeed(ball, speedScale)
         ball.resumeDirection = dir
         ball.velocity = dir * targetSpeed
-        ball.stretchFactor = 1.20f
-        ball.squashFactor = 0.84f
+        ball.stretchFactor = 1.08f + s * 0.24f
+        ball.squashFactor = (0.92f - s * 0.14f).coerceIn(0.72f, 0.94f)
         ball.deformAngle = atan2(dir.y, dir.x)
-        ball.weaponSpinBurst = 12f
-        spawnShockwave(ball.position.x, ball.position.y, ball.character.auraColor, ball.radius * 1.9f)
+        ball.weaponSpinBurst = 8f + s * 14f
+        spawnShockwave(ball.position.x, ball.position.y, ball.character.auraColor, ball.radius * (1.45f + s * 0.95f))
         spawnImpactBurst(ball.position.x, ball.position.y, ball.character.auraColor, engineSettings.renderMode.particleCountOnHit / 2)
     }
 
@@ -710,9 +766,12 @@ class BattleSimulation(
         ball.weaponScale = ball.targetWeaponScale
         ball.passiveFlashTimer = 0.85f
 
+        val rolledMultiDashCharges = 3 + rng.nextInt(3) // Random probability of 3 to 5 Multi-Dashes!
+        ball.multiDashChargesRemaining = rolledMultiDashCharges
+
         val isPlayer = ball === playerBall
         if (isPlayer) {
-            // Immediately unlock Multi-Dash when entering Ultimate form!
+            // Immediately unlock the rolled 3..5 Multi-Dash charges when entering Ultimate form!
             playerRedirectCooldown = 0f
         } else if (!isRemoteMultiplayer && activeBotDifficulty != BotDifficulty.EASY) {
             aiRedirectCooldown = min(aiRedirectCooldown, 0.5f)
@@ -816,6 +875,7 @@ class BattleSimulation(
                 if (rival.isUltimateActive) {
                     rival.isUltimateActive = false
                     rival.ultimateTimeRemaining = 0f
+                    rival.multiDashChargesRemaining = 0
                     rival.isSeriousActive = false
                     rival.ultimateCooldownRemaining = rival.effectiveUltCooldownSec * 0.78f
                     spawnShockwave(rival.position.x, rival.position.y, Color(0xFFEF4444), rival.radius * 3.2f, AbilityVfxStyle.SLASH_CROSS, 0.46f)
@@ -1501,6 +1561,7 @@ class BattleSimulation(
                 ball.isUltimateActive = false
                 ball.ultimateTimeRemaining = 0f
                 ball.ultVolleyTimer = 0f
+                ball.multiDashChargesRemaining = 0
                 ball.isSeriousActive = false
                 ball.kamuiBounceStacks = 0
                 ball.ultimateGauge = 0f
@@ -2090,9 +2151,10 @@ class BattleSimulation(
         attackerBall: CombatBall,
         blockedDamage: Float,
         isPlayerCountering: Boolean,
-        attackerFacingOverride: Vector2? = null
+        attackerFacingOverride: Vector2? = null,
+        overrideArchetype: CounterArchetype? = null
     ) {
-        val archetype = counterBall.character.counterArchetype
+        val archetype = overrideArchetype ?: counterBall.character.counterArchetype
         counterBall.counterActiveTimer = 0f
         counterBall.counterCooldownRemaining = counterBall.counterCooldownSec
         counterBall.passiveFlashTimer = 0.90f
@@ -2138,6 +2200,7 @@ class BattleSimulation(
                 if (attackerBall.isUltimateActive) {
                     attackerBall.isUltimateActive = false
                     attackerBall.ultimateTimeRemaining = 0f
+                    attackerBall.multiDashChargesRemaining = 0
                     attackerBall.isSeriousActive = false
                     attackerBall.ultimateCooldownRemaining = attackerBall.effectiveUltCooldownSec * 0.75f
                 } else {
@@ -2189,7 +2252,11 @@ class BattleSimulation(
         }
         screenShakeAmount = max(screenShakeAmount, 18f)
         spawnImpactBurst(counterBall.position.x, counterBall.position.y, Color(0xFF38BDF8), engineSettings.renderMode.particleCountOnHit)
-        val canonCallout = LorePowerBalancer.resolveCanonCounterCallout(counterBall.character)
+        val canonCallout = if (overrideArchetype != null && overrideArchetype != counterBall.character.counterArchetype) {
+            overrideArchetype.simpleName.uppercase() + "!"
+        } else {
+            LorePowerBalancer.resolveCanonCounterCallout(counterBall.character)
+        }
         spawnFloatingText(
             "$canonCallout -$counterDamage",
             counterBall.position.x,

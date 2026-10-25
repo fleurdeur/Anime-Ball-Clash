@@ -1,6 +1,21 @@
 package com.example.ui.screens
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -55,6 +70,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -100,6 +116,26 @@ fun CustomMatchScreen(
     var roleFilter by remember { mutableStateOf(CustomRoleFilter.ALL) }
     var elementFilter by remember { mutableStateOf<ElementTag?>(null) }
     var previewUlt by remember { mutableStateOf(false) }
+
+    val stageMotion = rememberInfiniteTransition(label = "custom_match_motion")
+    val liveWeaponAngle by stageMotion.animateFloat(
+        initialValue = 0f,
+        targetValue = 6.2831855f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 4600, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "custom_weapon_angle"
+    )
+    val vsPulseScale by stageMotion.animateFloat(
+        initialValue = 0.94f,
+        targetValue = 1.08f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 920),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "vs_badge_pulse"
+    )
 
     val playerChar = remember(profile.selectedCharacterId) {
         CharacterRoster.getById(profile.selectedCharacterId)
@@ -304,6 +340,7 @@ fun CustomMatchScreen(
                                 character = playerChar,
                                 isEditing = activeTab == CustomSlotTab.PLAYER,
                                 isUltPreview = previewUlt,
+                                liveWeaponAngle = liveWeaponAngle,
                                 compact = compactWidth,
                                 accent = palette.blueAccent,
                                 onClick = { activeTab = CustomSlotTab.PLAYER },
@@ -315,7 +352,12 @@ fun CustomMatchScreen(
                             Surface(
                                 shape = CircleShape,
                                 color = palette.primaryAccent,
-                                modifier = Modifier.size(if (compactWidth) 32.dp else 38.dp)
+                                modifier = Modifier
+                                    .size(if (compactWidth) 32.dp else 38.dp)
+                                    .graphicsLayer {
+                                        scaleX = vsPulseScale
+                                        scaleY = vsPulseScale
+                                    }
                             ) {
                                 Box(contentAlignment = Alignment.Center) {
                                     Text(
@@ -331,6 +373,7 @@ fun CustomMatchScreen(
                                 character = selectedOpponent,
                                 isEditing = activeTab == CustomSlotTab.RIVAL,
                                 isUltPreview = previewUlt,
+                                liveWeaponAngle = -liveWeaponAngle,
                                 compact = compactWidth,
                                 accent = palette.primaryAccent,
                                 onClick = { activeTab = CustomSlotTab.RIVAL },
@@ -475,6 +518,14 @@ fun CustomMatchScreen(
                             char.id == selectedOpponent.id
                         }
                         val accent = if (activeTab == CustomSlotTab.PLAYER) palette.blueAccent else palette.primaryAccent
+                        val pickScale by animateFloatAsState(
+                            targetValue = if (isSelected) 1.03f else 1f,
+                            animationSpec = spring(
+                                dampingRatio = Spring.DampingRatioMediumBouncy,
+                                stiffness = Spring.StiffnessMediumLow
+                            ),
+                            label = "custom_pick_scale_${char.id}"
+                        )
 
                         Surface(
                             onClick = {
@@ -492,6 +543,10 @@ fun CustomMatchScreen(
                             ),
                             modifier = Modifier
                                 .fillMaxWidth()
+                                .graphicsLayer {
+                                    scaleX = pickScale
+                                    scaleY = pickScale
+                                }
                                 .testTag("custom_pick_${char.id}")
                         ) {
                             Column(
@@ -510,7 +565,7 @@ fun CustomMatchScreen(
                                         AnimeBallRenderer.drawPreviewAvatar(
                                             scope = this,
                                             character = char,
-                                            weaponAngle = 0.72f,
+                                            weaponAngle = if (isSelected) liveWeaponAngle else 0.72f,
                                             isUltimatePreview = previewUlt
                                         )
                                     }
@@ -547,6 +602,7 @@ private fun MatchupSlotCard(
     character: CharacterData,
     isEditing: Boolean,
     isUltPreview: Boolean,
+    liveWeaponAngle: Float,
     compact: Boolean,
     accent: Color,
     onClick: () -> Unit,
@@ -562,49 +618,59 @@ private fun MatchupSlotCard(
         border = BorderStroke(if (isEditing) 1.8.dp else 1.dp, if (isEditing) accent else palette.border),
         modifier = modifier
     ) {
-        Row(
-            modifier = Modifier.padding(horizontal = if (compact) 8.dp else 10.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(ringSize)
-                    .clip(CircleShape)
-                    .background(palette.stageSurface)
-                    .border(1.dp, palette.stageLine, CircleShape),
-                contentAlignment = Alignment.Center
+        AnimatedContent(
+            targetState = character,
+            transitionSpec = {
+                (scaleIn(initialScale = 0.90f, animationSpec = tween(200)) + fadeIn(tween(180))) togetherWith
+                    (scaleOut(targetScale = 0.92f, animationSpec = tween(140)) + fadeOut(tween(130)))
+            },
+            contentKey = { it.id },
+            label = "slot_char_${roleLabel}"
+        ) { targetChar ->
+            Row(
+                modifier = Modifier.padding(horizontal = if (compact) 8.dp else 10.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Canvas(modifier = Modifier.size(canvasSize)) {
-                    AnimeBallRenderer.drawPreviewAvatar(
-                        scope = this,
-                        character = character,
-                        weaponAngle = if (isUltPreview) 1.15f else 0.7f,
-                        isUltimatePreview = isUltPreview
+                Box(
+                    modifier = Modifier
+                        .size(ringSize)
+                        .clip(CircleShape)
+                        .background(palette.stageSurface)
+                        .border(1.dp, palette.stageLine, CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Canvas(modifier = Modifier.size(canvasSize)) {
+                        AnimeBallRenderer.drawPreviewAvatar(
+                            scope = this,
+                            character = targetChar,
+                            weaponAngle = if (isUltPreview) liveWeaponAngle * 1.5f else liveWeaponAngle,
+                            isUltimatePreview = isUltPreview
+                        )
+                    }
+                }
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = if (isEditing) "$roleLabel • PICKING" else "$roleLabel • TAP",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = accent,
+                        maxLines = 1
+                    )
+                    Text(
+                        text = targetChar.name,
+                        style = MaterialTheme.typography.titleMedium,
+                        color = palette.textPrimary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = "${targetChar.animeRace.simpleName} • Random Counter",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = palette.textSecondary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
-            }
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = if (isEditing) "$roleLabel • PICKING" else "$roleLabel • TAP",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = accent,
-                    maxLines = 1
-                )
-                Text(
-                    text = character.name,
-                    style = MaterialTheme.typography.titleMedium,
-                    color = palette.textPrimary,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Text(
-                    text = "${character.animeRace.simpleName} • Auto ${character.autoCounterPercent}%",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = palette.textSecondary,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
             }
         }
     }

@@ -3,6 +3,11 @@ package com.example.audio
 import android.content.Context
 import android.media.AudioAttributes
 import android.media.SoundPool
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream
@@ -26,13 +31,15 @@ enum class GameSfx {
 }
 
 /**
- * Low-latency polyphonic procedural audio engine for Anime Ball Clash.
- * Synthesizes 16-bit 22.05kHz PCM WAV waveforms on first launch and plays them through
- * Android SoundPool with pitch/volume modulation for collisions, passives, and awakenings.
+ * Low-latency polyphonic audio engine for Anime Ball Clash.
+ * Loads real cached MP3 sound effects fetched from Mixkit / Internet Archive via [RealAudioRepository]
+ * (with instant offline acoustic WAV fallback while downloading) and modulates pitch/volume dynamically.
  * Gracefully degrades to event-counting mode in headless JVM unit tests.
  */
 class SoundManager(context: Context?) {
 
+    private val appContext: Context? = context?.applicationContext
+    private val sfxScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var soundPool: SoundPool? = null
     private val soundIds = HashMap<GameSfx, Int>()
     private val loadedSoundIds = HashSet<Int>()
@@ -45,7 +52,7 @@ class SoundManager(context: Context?) {
     private val playCounts = HashMap<GameSfx, Int>()
 
     init {
-        if (context != null) {
+        if (appContext != null) {
             try {
                 val attrs = AudioAttributes.Builder()
                     .setUsage(AudioAttributes.USAGE_GAME)
@@ -66,16 +73,45 @@ class SoundManager(context: Context?) {
                 }
                 soundPool = pool
 
-                val sfxDir = File(context.cacheDir, "abc_sfx_v2").apply { mkdirs() }
+                val sfxDir = File(appContext.cacheDir, "abc_sfx_v2").apply { mkdirs() }
                 GameSfx.entries.forEach { sfx ->
-                    val wavFile = File(sfxDir, "${sfx.name.lowercase()}.wav")
-                    if (!wavFile.exists() || wavFile.length() < 64L) {
-                        val pcmBytes = synthesizeSfxWav(sfx)
-                        FileOutputStream(wavFile).use { it.write(pcmBytes) }
+                    val cachedRealMp3 = RealAudioRepository.getCachedSfxFile(appContext, sfx)
+                    val initialFile = if (cachedRealMp3 != null) {
+                        cachedRealMp3
+                    } else {
+                        val wavFile = File(sfxDir, "${sfx.name.lowercase()}.wav")
+                        if (!wavFile.exists() || wavFile.length() < 64L) {
+                            val pcmBytes = synthesizeSfxWav(sfx)
+                            FileOutputStream(wavFile).use { it.write(pcmBytes) }
+                        }
+                        wavFile
                     }
-                    val id = pool.load(wavFile.absolutePath, 1)
+                    val id = pool.load(initialFile.absolutePath, 1)
                     if (id > 0) {
-                        soundIds[sfx] = id
+                        synchronized(soundIds) {
+                            soundIds[sfx] = id
+                        }
+                    }
+                }
+
+                // Fetch real Mixkit / Internet Archive SFX MP3s in background and hot-swap into SoundPool
+                sfxScope.launch {
+                    GameSfx.entries.forEach { sfx ->
+                        if (RealAudioRepository.getCachedSfxFile(appContext, sfx) == null) {
+                            val downloaded = RealAudioRepository.fetchSfxFile(appContext, sfx)
+                            val activePool = soundPool
+                            if (downloaded != null && activePool != null) {
+                                try {
+                                    val realId = activePool.load(downloaded.absolutePath, 1)
+                                    if (realId > 0) {
+                                        synchronized(soundIds) {
+                                            soundIds[sfx] = realId
+                                        }
+                                    }
+                                } catch (_: Throwable) {
+                                }
+                            }
+                        }
                     }
                 }
             } catch (_: Throwable) {
@@ -109,8 +145,11 @@ class SoundManager(context: Context?) {
         play(GameSfx.PASSIVE_TRIGGER, volume = 0.66f, pitch = pitch, minIntervalMs = 130L)
     }
 
-    fun playRedirectDash() {
-        play(GameSfx.REDIRECT_DASH, volume = 0.65f, pitch = 1.02f, minIntervalMs = 90L)
+    fun playRedirectDash(stretchRatio: Float = 0.75f) {
+        val clamped = stretchRatio.coerceIn(0.15f, 1.0f)
+        val vol = (0.50f + clamped * 0.45f).coerceIn(0.45f, 0.98f)
+        val pitch = (0.84f + clamped * 0.38f).coerceIn(0.80f, 1.32f)
+        play(GameSfx.REDIRECT_DASH, volume = vol, pitch = pitch, minIntervalMs = 75L)
     }
 
     fun playCounterParry() {
@@ -156,7 +195,7 @@ class SoundManager(context: Context?) {
         }
 
         val pool = soundPool ?: return
-        val soundId = soundIds[sfx] ?: return
+        val soundId = synchronized(soundIds) { soundIds[sfx] } ?: return
         try {
             val isLoaded = synchronized(loadedSoundIds) { loadedSoundIds.contains(soundId) }
             if (isLoaded) {
@@ -169,6 +208,7 @@ class SoundManager(context: Context?) {
     }
 
     fun release() {
+        sfxScope.cancel()
         try {
             soundPool?.release()
         } catch (_: Throwable) {

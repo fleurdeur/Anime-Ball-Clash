@@ -1,6 +1,20 @@
 package com.example.ui.screens
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -81,6 +95,17 @@ fun ShopScreen(
     val palette = AppTheme.palette
     var selectedTab by remember { mutableIntStateOf(0) } // 0 = Recruit 220+ Fighters, 1 = Upgrade Forge
     var searchQuery by remember { mutableStateOf("") }
+
+    val shopMotion = rememberInfiniteTransition(label = "shop_preview_motion")
+    val liveWeaponAngle by shopMotion.animateFloat(
+        initialValue = 0f,
+        targetValue = 6.2831855f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 5200, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "shop_weapon_angle"
+    )
 
     val sortedRecruits by remember(unlockedIds, searchQuery) {
         derivedStateOf {
@@ -195,41 +220,60 @@ fun ShopScreen(
 
                 Spacer(modifier = Modifier.height(10.dp))
 
-                if (selectedTab == 0) {
-                    OutlinedTextField(
-                        value = searchQuery,
-                        onValueChange = { searchQuery = it },
-                        singleLine = true,
-                        placeholder = { Text("Search fighter or anime...", color = palette.textMuted) },
-                        leadingIcon = {
-                            Icon(Icons.Outlined.Search, contentDescription = null, tint = palette.textSecondary)
-                        },
-                        shape = RoundedCornerShape(14.dp),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedContainerColor = palette.cardSurface,
-                            unfocusedContainerColor = palette.cardSurface,
-                            focusedBorderColor = palette.blueAccent,
-                            unfocusedBorderColor = palette.border,
-                            focusedTextColor = palette.textPrimary,
-                            unfocusedTextColor = palette.textPrimary
-                        ),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("shop_search_input")
-                    )
+                AnimatedContent(
+                    targetState = selectedTab,
+                    transitionSpec = {
+                        val dir = if (targetState > initialState) 1 else -1
+                        (slideInHorizontally(
+                            animationSpec = spring(
+                                dampingRatio = Spring.DampingRatioNoBouncy,
+                                stiffness = Spring.StiffnessMediumLow
+                            ),
+                            initialOffsetX = { fullWidth -> (fullWidth * 0.18f * dir).toInt() }
+                        ) + fadeIn(tween(180))) togetherWith (slideOutHorizontally(
+                            animationSpec = tween(150),
+                            targetOffsetX = { fullWidth -> -(fullWidth * 0.14f * dir).toInt() }
+                        ) + fadeOut(tween(130)))
+                    },
+                    label = "shop_tab_transition",
+                    modifier = Modifier.weight(1f)
+                ) { activeTab ->
+                    if (activeTab == 0) {
+                        Column(modifier = Modifier.fillMaxSize()) {
+                            OutlinedTextField(
+                                value = searchQuery,
+                                onValueChange = { searchQuery = it },
+                                singleLine = true,
+                                placeholder = { Text("Search fighter or anime...", color = palette.textMuted) },
+                                leadingIcon = {
+                                    Icon(Icons.Outlined.Search, contentDescription = null, tint = palette.textSecondary)
+                                },
+                                shape = RoundedCornerShape(14.dp),
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedContainerColor = palette.cardSurface,
+                                    unfocusedContainerColor = palette.cardSurface,
+                                    focusedBorderColor = palette.blueAccent,
+                                    unfocusedBorderColor = palette.border,
+                                    focusedTextColor = palette.textPrimary,
+                                    unfocusedTextColor = palette.textPrimary
+                                ),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("shop_search_input")
+                            )
 
-                    Spacer(modifier = Modifier.height(10.dp))
+                            Spacer(modifier = Modifier.height(10.dp))
 
-                    LazyColumn(
-                        contentPadding = PaddingValues(bottom = 20.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp),
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        items(
-                            items = sortedRecruits,
-                            key = { it.id },
-                            contentType = { "shop_recruit_card" }
-                        ) { character ->
+                            LazyColumn(
+                                contentPadding = PaddingValues(bottom = 20.dp),
+                                verticalArrangement = Arrangement.spacedBy(10.dp),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                items(
+                                    items = sortedRecruits,
+                                    key = { it.id },
+                                    contentType = { "shop_recruit_card" }
+                                ) { character ->
                             val isUnlocked = unlockedIds.contains(character.id)
                             val canAfford = profile.gold >= character.unlockCostGold
                             val isVillain = character.alignment == CharacterAlignment.ANTAGONIST
@@ -259,7 +303,7 @@ fun ShopScreen(
                                             AnimeBallRenderer.drawPreviewAvatar(
                                                 scope = this,
                                                 character = character,
-                                                weaponAngle = 0.7f
+                                                weaponAngle = liveWeaponAngle
                                             )
                                         }
                                     }
@@ -282,7 +326,7 @@ fun ShopScreen(
                                         )
                                         Spacer(modifier = Modifier.height(4.dp))
                                         Text(
-                                            text = "${character.passiveName}: ${character.simplePassiveSummary} • Auto ${character.counterArchetype.simpleName} (${character.autoCounterPercent}%)",
+                                            text = "${character.passiveName}: ${character.simplePassiveSummary} • Random Counter: ${character.counterArchetype.simpleName}",
                                             style = MaterialTheme.typography.bodyMedium,
                                             color = palette.textSecondary,
                                             maxLines = 2,
@@ -334,13 +378,14 @@ fun ShopScreen(
                                 }
                             }
                         }
-                    }
-                } else {
-                    LazyColumn(
-                        contentPadding = PaddingValues(bottom = 20.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp),
-                        modifier = Modifier.weight(1f)
-                    ) {
+                            }
+                        }
+                    } else {
+                        LazyColumn(
+                            contentPadding = PaddingValues(bottom = 20.dp),
+                            verticalArrangement = Arrangement.spacedBy(12.dp),
+                            modifier = Modifier.fillMaxSize()
+                        ) {
                         items(
                             items = unlockedRoster,
                             key = { "upg_${it.id}" },
@@ -380,7 +425,7 @@ fun ShopScreen(
                                                 AnimeBallRenderer.drawPreviewAvatar(
                                                     scope = this,
                                                     character = character,
-                                                    weaponAngle = 0.7f
+                                                    weaponAngle = if (isEquipped) liveWeaponAngle else 0.7f
                                                 )
                                             }
                                         }
@@ -447,6 +492,7 @@ fun ShopScreen(
                                     )
                                 }
                             }
+                        }
                         }
                     }
                 }

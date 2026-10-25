@@ -50,11 +50,16 @@ object TrajectoryPredictor {
             if (dragLen < 16f) return
 
             val launchDir = Vector2(-dragVector.x, -dragVector.y).normalized()
-            val powerRatio = min(dragLen / maxPullPx.coerceAtLeast(100f), 1.0f)
+            val powerRatio = (dragLen / maxPullPx.coerceAtLeast(80f)).coerceIn(0.15f, 1.0f)
 
-            val aimColor = if (isRedirectAim) Color(0xFF0284C7) else Color(0xFFEA580C)
-            val brightAim = if (isRedirectAim) Color(0xFF38BDF8) else Color(0xFFFACC15)
-            val activeAim = if (reticleColor.red > 0.5f) brightAim else aimColor
+            val lowStretchColor = if (isRedirectAim) Color(0xFF38BDF8) else Color(0xFFFB923C)
+            val highStretchColor = if (powerRatio >= 0.86f) Color(0xFFEF4444) else Color(0xFFFACC15)
+            val activeAim = Color(
+                red = lowStretchColor.red + (highStretchColor.red - lowStretchColor.red) * powerRatio,
+                green = lowStretchColor.green + (highStretchColor.green - lowStretchColor.green) * powerRatio,
+                blue = lowStretchColor.blue + (highStretchColor.blue - lowStretchColor.blue) * powerRatio,
+                alpha = 1f
+            )
 
             val ballCenter = Offset(ballPosition.x, ballPosition.y)
             val pullEnd = Offset(
@@ -62,16 +67,24 @@ object TrajectoryPredictor {
                 ballPosition.y + (dragVector.normalized().y * min(dragLen, maxPullPx))
             )
 
+            // Stretch tension aura ring around fighter ball
+            drawCircle(
+                color = activeAim.copy(alpha = 0.25f + powerRatio * 0.35f),
+                radius = ballRadius * (1.05f + powerRatio * 0.48f),
+                center = ballCenter,
+                style = Stroke(width = 2.0f + powerRatio * 2.5f)
+            )
+
             drawLine(
-                color = reticleColor.copy(alpha = 0.42f),
+                color = activeAim.copy(alpha = 0.65f),
                 start = ballCenter,
                 end = pullEnd,
-                strokeWidth = 3.5f,
+                strokeWidth = 2.6f + powerRatio * 3.8f,
                 cap = StrokeCap.Round
             )
-            drawCircle(color = activeAim, radius = 7f, center = pullEnd)
+            drawCircle(color = activeAim, radius = 5.5f + powerRatio * 4.5f, center = pullEnd)
 
-            val totalRayDist = (wallRight - wallLeft) * (0.75f + powerRatio * 1.15f)
+            val totalRayDist = (wallRight - wallLeft) * (0.48f + powerRatio * 1.48f)
             traceRayBounces(
                 origin = ballPosition,
                 initialDir = launchDir,
@@ -82,7 +95,8 @@ object TrajectoryPredictor {
                 wallBottom = wallBottom,
                 maxBounces = if (isRedirectAim) 1 else 2,
                 primaryColor = activeAim,
-                nodeColor = reticleColor
+                nodeColor = reticleColor,
+                baseStrokeWidth = 2.6f + powerRatio * 3.0f
             )
         }
     }
@@ -97,7 +111,8 @@ object TrajectoryPredictor {
         wallBottom: Float,
         maxBounces: Int,
         primaryColor: Color,
-        nodeColor: Color
+        nodeColor: Color,
+        baseStrokeWidth: Float = 4.5f
     ) {
         var currPos = origin
         var currDir = initialDir
@@ -138,7 +153,7 @@ object TrajectoryPredictor {
             }
 
             val segAlpha = (0.88f - bounce * 0.28f).coerceAtLeast(0.28f)
-            val strokeW = (4.5f - bounce * 1.1f).coerceAtLeast(2.2f)
+            val strokeW = (baseStrokeWidth - bounce * 1.0f).coerceAtLeast(2.0f)
 
             if (tMin < rem && bounce < maxBounces) {
                 val hit = currPos + (currDir * tMin)

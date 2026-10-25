@@ -10,12 +10,17 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
@@ -290,41 +295,117 @@ fun AnimeBallClashApp(
         modifier = Modifier.fillMaxSize(),
         label = "screen_page_transition",
         transitionSpec = {
-            val isArenaTransition =
+            fun hubTabRank(s: AppScreen): Int = when (s) {
+                AppScreen.HOME_HUB -> 0
+                AppScreen.CHARACTER_SELECT -> 1
+                AppScreen.SHOP -> 2
+                AppScreen.QUESTS -> 3
+                AppScreen.LEADERBOARD -> 4
+                else -> -1
+            }
+
+            val fromRank = hubTabRank(initialState)
+            val toRank = hubTabRank(targetState)
+
+            val isArenaOrLoading =
                 initialState == AppScreen.LOADING ||
                     targetState == AppScreen.LOADING ||
                     initialState == AppScreen.BATTLE_ARENA ||
                     targetState == AppScreen.BATTLE_ARENA
 
-            if (isArenaTransition) {
-                (fadeIn(tween(180, easing = FastOutSlowInEasing)) +
-                    scaleIn(initialScale = 0.985f, animationSpec = tween(180, easing = FastOutSlowInEasing)))
-                    .togetherWith(fadeOut(tween(140)))
-                    .using(SizeTransform(clip = false))
-            } else if (lastNavWasPop) {
-                (slideInHorizontally(
-                    animationSpec = tween(220, easing = FastOutSlowInEasing),
-                    initialOffsetX = { fullWidth -> -fullWidth / 7 }
-                ) + fadeIn(tween(200)))
-                    .togetherWith(
-                        slideOutHorizontally(
-                            animationSpec = tween(200, easing = FastOutSlowInEasing),
-                            targetOffsetX = { fullWidth -> fullWidth / 7 }
-                        ) + fadeOut(tween(160))
-                    )
-                    .using(SizeTransform(clip = false))
-            } else {
-                (slideInHorizontally(
-                    animationSpec = tween(220, easing = FastOutSlowInEasing),
-                    initialOffsetX = { fullWidth -> fullWidth / 7 }
-                ) + fadeIn(tween(200)))
-                    .togetherWith(
-                        slideOutHorizontally(
-                            animationSpec = tween(200, easing = FastOutSlowInEasing),
-                            targetOffsetX = { fullWidth -> -fullWidth / 7 }
-                        ) + fadeOut(tween(160))
-                    )
-                    .using(SizeTransform(clip = false))
+            val isModalStage =
+                targetState == AppScreen.CUSTOM_MATCH ||
+                    targetState == AppScreen.MULTIPLAYER_LOBBY ||
+                    targetState == AppScreen.MATCHMAKING ||
+                    targetState == AppScreen.RESULT
+
+            val isClosingModalStage =
+                (initialState == AppScreen.CUSTOM_MATCH ||
+                    initialState == AppScreen.MULTIPLAYER_LOBBY ||
+                    initialState == AppScreen.MATCHMAKING ||
+                    initialState == AppScreen.RESULT) && toRank >= 0
+
+            when {
+                isArenaOrLoading -> {
+                    (fadeIn(tween(220, easing = FastOutSlowInEasing)) +
+                        scaleIn(initialScale = 0.94f, animationSpec = tween(240, easing = FastOutSlowInEasing)))
+                        .togetherWith(
+                            fadeOut(tween(150)) + scaleOut(targetScale = 1.03f, animationSpec = tween(160))
+                        )
+                        .using(SizeTransform(clip = false))
+                }
+
+                isModalStage -> {
+                    (slideInVertically(
+                        animationSpec = spring(
+                            dampingRatio = Spring.DampingRatioNoBouncy,
+                            stiffness = Spring.StiffnessMediumLow
+                        ),
+                        initialOffsetY = { fullH -> fullH / 9 }
+                    ) + fadeIn(tween(220)) + scaleIn(initialScale = 0.96f, animationSpec = tween(220)))
+                        .togetherWith(
+                            fadeOut(tween(160)) + scaleOut(targetScale = 0.97f, animationSpec = tween(160))
+                        )
+                        .using(SizeTransform(clip = false))
+                }
+
+                isClosingModalStage -> {
+                    (fadeIn(tween(200)) + scaleIn(initialScale = 0.97f, animationSpec = tween(200)))
+                        .togetherWith(
+                            slideOutVertically(
+                                animationSpec = tween(200, easing = FastOutSlowInEasing),
+                                targetOffsetY = { fullH -> fullH / 10 }
+                            ) + fadeOut(tween(160))
+                        )
+                        .using(SizeTransform(clip = false))
+                }
+
+                fromRank >= 0 && toRank >= 0 -> {
+                    val forward = toRank > fromRank
+                    val dir = if (forward) 1 else -1
+                    (slideInHorizontally(
+                        animationSpec = spring(
+                            dampingRatio = Spring.DampingRatioNoBouncy,
+                            stiffness = Spring.StiffnessMediumLow
+                        ),
+                        initialOffsetX = { fullWidth -> dir * (fullWidth / 5) }
+                    ) + fadeIn(tween(200)))
+                        .togetherWith(
+                            slideOutHorizontally(
+                                animationSpec = tween(190, easing = FastOutSlowInEasing),
+                                targetOffsetX = { fullWidth -> -dir * (fullWidth / 6) }
+                            ) + fadeOut(tween(150))
+                        )
+                        .using(SizeTransform(clip = false))
+                }
+
+                lastNavWasPop -> {
+                    (slideInHorizontally(
+                        animationSpec = tween(220, easing = FastOutSlowInEasing),
+                        initialOffsetX = { fullWidth -> -fullWidth / 6 }
+                    ) + fadeIn(tween(200)))
+                        .togetherWith(
+                            slideOutHorizontally(
+                                animationSpec = tween(200, easing = FastOutSlowInEasing),
+                                targetOffsetX = { fullWidth -> fullWidth / 6 }
+                            ) + fadeOut(tween(160))
+                        )
+                        .using(SizeTransform(clip = false))
+                }
+
+                else -> {
+                    (slideInHorizontally(
+                        animationSpec = tween(220, easing = FastOutSlowInEasing),
+                        initialOffsetX = { fullWidth -> fullWidth / 6 }
+                    ) + fadeIn(tween(200)))
+                        .togetherWith(
+                            slideOutHorizontally(
+                                animationSpec = tween(200, easing = FastOutSlowInEasing),
+                                targetOffsetX = { fullWidth -> -fullWidth / 6 }
+                            ) + fadeOut(tween(160))
+                        )
+                        .using(SizeTransform(clip = false))
+                }
             }
         }
     ) { screen ->

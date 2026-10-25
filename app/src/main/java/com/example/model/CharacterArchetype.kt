@@ -452,7 +452,7 @@ data class CharacterData(
         get() = (baseAutoCounterChance * 100f).toInt()
 
     val simpleAutoCounterSummary: String
-        get() = "Auto $autoCounterPercent% chance when attacked: ${counterArchetype.simpleDesc}"
+        get() = "Random chance when hit: ${counterArchetype.simpleDesc}"
 
     val simplePassiveSummary: String
         get() = when (passiveArchetype) {
@@ -479,31 +479,31 @@ data class CharacterData(
     val simpleUltimateSummary: String
         get() = when {
             id == "satoru_void" ->
-                "Freezes rival in Domain and shoots Hollow Purple orb at rival + Multi-Dash!"
+                "Freezes rival in Domain and shoots Hollow Purple orb at rival + 3–5x Multi-Dash!"
             canonProjectileStyle == CanonProjectileStyle.BABYLON_SWORD_RAIN ->
-                "Summons multiple visible swords and throws them at rival for big damage + Multi-Dash!"
+                "Summons multiple visible swords and throws them at rival for big damage + 3–5x Multi-Dash!"
             canonProjectileStyle == CanonProjectileStyle.FLYING_RAIJIN_KUNAI ->
-                "Throws teleport kunai at rival to warp behind and attack + Multi-Dash!"
+                "Throws teleport kunai at rival to warp behind and attack + 3–5x Multi-Dash!"
             ultimateArchetype == UltimateArchetype.TIME_STOP ->
-                "Stops time to freeze rival and shoots ${canonProjectileStyle.simpleMoveLabel.lowercase().removePrefix("shoots ").removePrefix("fires ")} + Multi-Dash!"
+                "Stops time to freeze rival and shoots ${canonProjectileStyle.simpleMoveLabel.lowercase().removePrefix("shoots ").removePrefix("fires ")} + 3–5x Multi-Dash!"
             ultimateArchetype == UltimateArchetype.DOMAIN_STUN ->
-                "Traps rival in your Domain and ${canonProjectileStyle.simpleMoveLabel.lowercase()} + Multi-Dash!"
+                "Traps rival in your Domain and ${canonProjectileStyle.simpleMoveLabel.lowercase()} + 3–5x Multi-Dash!"
             ultimateArchetype == UltimateArchetype.METEOR_NUKE ->
-                "${canonProjectileStyle.simpleMoveLabel} at rival for big AoE damage + Multi-Dash!"
+                "${canonProjectileStyle.simpleMoveLabel} at rival for big AoE damage + 3–5x Multi-Dash!"
             ultimateArchetype == UltimateArchetype.SERIOUS_ONE_PUNCH ->
-                "Next hit deals massive one-punch damage and ${canonProjectileStyle.simpleMoveLabel.lowercase()} + Multi-Dash!"
+                "Next hit deals massive one-punch damage and ${canonProjectileStyle.simpleMoveLabel.lowercase()} + 3–5x Multi-Dash!"
             ultimateArchetype == UltimateArchetype.HEAL_REFORGE ->
-                "Heals big HP right away, powers up hits, and ${canonProjectileStyle.simpleMoveLabel.lowercase()} + Multi-Dash!"
+                "Heals big HP right away, powers up hits, and ${canonProjectileStyle.simpleMoveLabel.lowercase()} + 3–5x Multi-Dash!"
             ultimateArchetype == UltimateArchetype.ULT_NULLIFY ->
-                "Cancels rival's Ultimate, drains Ult bar, and ${canonProjectileStyle.simpleMoveLabel.lowercase()} + Multi-Dash!"
+                "Cancels rival's Ultimate, drains Ult bar, and ${canonProjectileStyle.simpleMoveLabel.lowercase()} + 3–5x Multi-Dash!"
             ultimateArchetype == UltimateArchetype.HAZARD_STORM ->
-                "${canonProjectileStyle.simpleMoveLabel} and leaves fire zones across the arena + Multi-Dash!"
+                "${canonProjectileStyle.simpleMoveLabel} and leaves fire zones across the arena + 3–5x Multi-Dash!"
             ultimateArchetype == UltimateArchetype.GRAVITY_CRUSH ->
-                "${canonProjectileStyle.simpleMoveLabel} to crush and slow rival + Multi-Dash!"
+                "${canonProjectileStyle.simpleMoveLabel} to crush and slow rival + 3–5x Multi-Dash!"
             ultimateArchetype == UltimateArchetype.SOUL_DEVOUR ->
-                "${canonProjectileStyle.simpleMoveLabel} to steal rival HP and Ult power + Multi-Dash!"
+                "${canonProjectileStyle.simpleMoveLabel} to steal rival HP and Ult power + 3–5x Multi-Dash!"
             else ->
-                "Big speed boost, ${canonProjectileStyle.simpleMoveLabel.lowercase()}, and fast Multi-Dash!"
+                "Big speed boost, ${canonProjectileStyle.simpleMoveLabel.lowercase()}, and 3–5x Multi-Dash!"
         }
 
     val officialUltVoiceLine: String

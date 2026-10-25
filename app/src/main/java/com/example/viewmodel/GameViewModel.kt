@@ -71,6 +71,7 @@ data class BattleHudState(
     val redirectReady: Boolean = true,
     val redirectHalfSecsLeft: Int = 0,
     val isMultiDashActive: Boolean = false,
+    val multiDashCharges: Int = 0,
     val canTriggerCounter: Boolean = true,
     val isPlayerCounterActive: Boolean = false,
     val playerCounterActiveHalfSecs: Int = 0,
@@ -220,10 +221,16 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     private var lastAppliedPackedSync = ""
     private var firestoreSyncAccumulator = 0f
 
+    private var lastDashStretchRatio = 0.75f
+
     init {
         soundManager.isEnabled = _engineSettings.value.sfxEnabled
         battleAudioDirector.sfxEnabled = _engineSettings.value.sfxEnabled
         battleAudioDirector.musicEnabled = _engineSettings.value.musicEnabled
+        battleAudioDirector.prefetchCharacterVoices(
+            CharacterRoster.getById(_playerProfile.value.selectedCharacterId),
+            _customOpponentCharacter.value
+        )
         observeLanEvents()
         viewModelScope.launch {
             delay(650)
@@ -526,6 +533,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
 
     fun selectCustomOpponent(character: CharacterData) {
         _customOpponentCharacter.value = character
+        battleAudioDirector.prefetchCharacterVoices(character)
         soundManager.playUiTap()
     }
 
@@ -1096,6 +1104,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         if (!_unlockedCharacterIds.value.contains(charId)) return
         val updated = _playerProfile.value.copy(selectedCharacterId = charId)
         _playerProfile.value = updated
+        battleAudioDirector.prefetchCharacterVoices(CharacterRoster.getById(charId))
         refreshLeaderboardState()
         prefs.edit().putString("selected_char", charId).apply()
         pushCloudSyncAsync()
@@ -1343,6 +1352,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
 
         val playerChar = CharacterRoster.getById(_playerProfile.value.selectedCharacterId)
         val oppChar = _opponentCharacter.value
+        battleAudioDirector.prefetchCharacterVoices(playerChar, oppChar)
         val playerUpg = getUpgradesFor(playerChar.id)
 
         val oppUpg = if (isRemote && remoteUpgrades != null) {
@@ -1439,7 +1449,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
                 battleAudioDirector.speakUltimateVoiceLine(speakingChar, isPlayer)
                 triggerHaptic(80L)
                 latestBannerText = if (isPlayer) {
-                    "ULTIMATE: $ultName • MULTI-DASH!"
+                    "ULTIMATE: $ultName • ${pBall.multiDashChargesRemaining}x MULTI-DASH!"
                 } else {
                     "$rivalTag USED $ultName!"
                 }
@@ -1451,7 +1461,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
             },
             onRedirectUsed = { isPlayer ->
                 if (isPlayer) {
-                    soundManager.playRedirectDash()
+                    soundManager.playRedirectDash(lastDashStretchRatio)
                 }
             },
             onCounterActivated = { isPlayer, counterName ->
@@ -1461,7 +1471,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
                     countersUsedInMatch++
                 }
                 val who = if (isPlayer) "YOU" else rivalTag
-                latestBannerText = "$who AUTO: $counterName!"
+                latestBannerText = "$who COUNTER: $counterName!"
             }
         )
         sim.activeBotDifficulty = _botDifficulty.value
@@ -1523,20 +1533,22 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         val dragLen = dragVector.length()
         if (dragLen < 16f) return
         val launchDir = Vector2(-dragVector.x, -dragVector.y).normalized()
+        val stretchRatio = (dragLen / maxPullPx.coerceAtLeast(80f)).coerceIn(0.15f, 1.0f)
+        lastDashStretchRatio = stretchRatio
 
         when (_turnState.value) {
             TurnState.AIM_OPENING -> {
-                sim.startNonstopClash(launchDir, _botDifficulty.value)
+                sim.startNonstopClash(launchDir, _botDifficulty.value, stretchRatio)
                 _turnState.value = TurnState.NONSTOP_CLASH
-                soundManager.playRedirectDash()
-                triggerHaptic(30L)
+                soundManager.playRedirectDash(stretchRatio)
+                triggerHaptic((18L + (stretchRatio * 24f).toLong()).coerceIn(18L, 45L))
                 broadcastLocalMove(launchDir, isOpening = true)
                 syncHudState(sim, force = true)
             }
 
             TurnState.NONSTOP_CLASH -> {
-                if (sim.redirectPlayerBall(launchDir)) {
-                    triggerHaptic(22L)
+                if (sim.redirectPlayerBall(launchDir, stretchRatio)) {
+                    triggerHaptic((16L + (stretchRatio * 22f).toLong()).coerceIn(16L, 40L))
                     broadcastLocalMove(launchDir, isOpening = false)
                     syncHudState(sim, force = true)
                 }
@@ -1642,7 +1654,8 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
             opponentUltMaxCooldownSec = o.effectiveUltCooldownSec,
             redirectReady = sim.playerRedirectCooldown <= 0.05f,
             redirectHalfSecsLeft = redirectHalfSecs,
-            isMultiDashActive = p.isUltimateActive,
+            isMultiDashActive = p.isUltimateActive && p.multiDashChargesRemaining > 0,
+            multiDashCharges = p.multiDashChargesRemaining,
             canTriggerCounter = p.canActivateCounter,
             isPlayerCounterActive = p.isCounterActive,
             playerCounterActiveHalfSecs = pCounterActiveHalf,

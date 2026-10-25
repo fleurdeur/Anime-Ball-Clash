@@ -47,10 +47,17 @@ import com.example.model.PlayerProfile
 import com.example.ui.components.AnimeBallRenderer
 import com.example.ui.theme.AppTheme
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -72,8 +79,10 @@ fun ResultScreen(
     }
 
     val heroScale = remember { Animatable(0.84f) }
+    val cardsReveal = remember { Animatable(0f) }
     LaunchedEffect(stats.playerCharacterId, stats.isPlayerWinner) {
         heroScale.snapTo(0.84f)
+        cardsReveal.snapTo(0f)
         heroScale.animateTo(
             targetValue = 1f,
             animationSpec = spring(
@@ -81,7 +90,31 @@ fun ResultScreen(
                 stiffness = Spring.StiffnessLow
             )
         )
+        cardsReveal.animateTo(
+            targetValue = 1f,
+            animationSpec = tween(durationMillis = 240)
+        )
     }
+
+    val resultMotion = rememberInfiniteTransition(label = "result_avatar_motion")
+    val liveWeaponAngle by resultMotion.animateFloat(
+        initialValue = 0f,
+        targetValue = 6.2831855f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = if (stats.isPlayerWinner) 3600 else 5600, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "result_weapon_spin"
+    )
+    val avatarBobPx by resultMotion.animateFloat(
+        initialValue = -5f,
+        targetValue = 5f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1500),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "result_avatar_bob"
+    )
 
     val bannerBg = if (stats.isPlayerWinner) palette.greenAccentSoft else palette.primaryAccentSoft
     val bannerFg = if (stats.isPlayerWinner) palette.greenAccent else palette.primaryAccent
@@ -132,6 +165,7 @@ fun ResultScreen(
                     .graphicsLayer {
                         scaleX = heroScale.value
                         scaleY = heroScale.value
+                        translationY = avatarBobPx
                     }
                     .clip(CircleShape)
                     .background(palette.stageSurface)
@@ -142,7 +176,7 @@ fun ResultScreen(
                     AnimeBallRenderer.drawPreviewAvatar(
                         scope = this,
                         character = playerChar,
-                        weaponAngle = 0.72f,
+                        weaponAngle = liveWeaponAngle,
                         isUltimatePreview = stats.isPlayerWinner
                     )
                 }
@@ -165,7 +199,12 @@ fun ResultScreen(
                 shape = RoundedCornerShape(20.dp),
                 color = palette.cardSurface,
                 border = BorderStroke(1.dp, palette.border),
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .graphicsLayer {
+                        alpha = 0.35f + 0.65f * cardsReveal.value
+                        translationY = (1f - cardsReveal.value) * 18f
+                    }
             ) {
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text("Rewards", style = MaterialTheme.typography.titleLarge, color = palette.textPrimary)
@@ -189,7 +228,12 @@ fun ResultScreen(
                 shape = RoundedCornerShape(20.dp),
                 color = palette.cardSurface,
                 border = BorderStroke(1.dp, palette.border),
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .graphicsLayer {
+                        alpha = 0.35f + 0.65f * cardsReveal.value
+                        translationY = (1f - cardsReveal.value) * 26f
+                    }
             ) {
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text("Fight Summary", style = MaterialTheme.typography.titleLarge, color = palette.textPrimary)

@@ -2,11 +2,28 @@ package com.example.ui.screens
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -54,7 +71,9 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -64,6 +83,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -104,9 +125,69 @@ fun HomeHubScreen(
     var showRenameDialog by remember { mutableStateOf(false) }
     var previewUltOnStage by remember(profile.selectedCharacterId) { mutableStateOf(false) }
     var draftName by remember(profile.username) { mutableStateOf(profile.username) }
+    var lastCycleDirection by remember { mutableIntStateOf(1) }
 
     val activeCharacter = remember(profile.selectedCharacterId) {
         CharacterRoster.getById(profile.selectedCharacterId)
+    }
+
+    // Live 60fps continuous stage animations (orbiting weapon/Stand, floating bob, pulsing aura & CTA)
+    val stageTransition = rememberInfiniteTransition(label = "home_stage_motion")
+    val liveOrbitAngle by stageTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = (Math.PI * 2.0).toFloat(),
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 4400, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "liveOrbitAngle"
+    )
+    val floatBobPx by stageTransition.animateFloat(
+        initialValue = -7f,
+        targetValue = 7f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1750, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "floatBobPx"
+    )
+    val auraPulse by stageTransition.animateFloat(
+        initialValue = 0.88f,
+        targetValue = 1.14f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1600, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "auraPulse"
+    )
+    val ctaPulse by stageTransition.animateFloat(
+        initialValue = 1.0f,
+        targetValue = 1.022f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 960, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "ctaPulse"
+    )
+
+    val ultPreviewScale by animateFloatAsState(
+        targetValue = if (previewUltOnStage) 1.07f else 1.0f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessMediumLow
+        ),
+        label = "ultPreviewScale"
+    )
+
+    val entranceLift = remember { Animatable(0.95f) }
+    LaunchedEffect(Unit) {
+        entranceLift.animateTo(
+            targetValue = 1f,
+            animationSpec = spring(
+                dampingRatio = Spring.DampingRatioNoBouncy,
+                stiffness = Spring.StiffnessMediumLow
+            )
+        )
     }
 
     BackHandler(enabled = showSettingsDialog || showRenameDialog) {
@@ -277,12 +358,17 @@ fun HomeHubScreen(
                     }
                 }
 
-                // 2. Atmospheric Fighter Showcase Stage Card
+                // 2. Atmospheric Animated Fighter Showcase Stage Card
                 Surface(
                     shape = RoundedCornerShape(22.dp),
                     color = palette.cardSurface,
                     border = BorderStroke(1.dp, palette.border),
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .graphicsLayer {
+                            scaleX = entranceLift.value
+                            scaleY = entranceLift.value
+                        }
                 ) {
                     Column(modifier = Modifier.padding(16.dp)) {
                         Box(
@@ -292,10 +378,22 @@ fun HomeHubScreen(
                                 .background(palette.stageSurface)
                                 .border(1.dp, palette.stageLine, RoundedCornerShape(18.dp))
                                 .drawBehind {
+                                    val center = Offset(size.width * 0.5f, size.height * 0.52f)
+                                    val baseR = size.minDimension * 0.48f
                                     drawCircle(
-                                        color = activeCharacter.auraColor.copy(alpha = 0.16f),
-                                        radius = size.minDimension * 0.56f,
-                                        center = Offset(size.width * 0.5f, size.height * 0.54f)
+                                        color = activeCharacter.auraColor.copy(
+                                            alpha = if (previewUltOnStage) 0.26f else 0.16f
+                                        ),
+                                        radius = baseR * auraPulse,
+                                        center = center
+                                    )
+                                    drawCircle(
+                                        color = activeCharacter.auraColor.copy(
+                                            alpha = if (previewUltOnStage) 0.42f else 0.22f
+                                        ),
+                                        radius = baseR * (0.72f + (auraPulse - 0.88f) * 0.85f),
+                                        center = center,
+                                        style = Stroke(width = if (previewUltOnStage) 2.6f else 1.6f)
                                     )
                                 }
                                 .padding(14.dp)
@@ -383,7 +481,10 @@ fun HomeHubScreen(
                                     horizontalArrangement = Arrangement.SpaceBetween
                                 ) {
                                     IconButton(
-                                        onClick = { onCycleCharacter(-1) },
+                                        onClick = {
+                                            lastCycleDirection = -1
+                                            onCycleCharacter(-1)
+                                        },
                                         modifier = Modifier
                                             .size(48.dp)
                                             .background(palette.cardSurface, CircleShape)
@@ -400,28 +501,50 @@ fun HomeHubScreen(
                                     AnimatedContent(
                                         targetState = activeCharacter,
                                         transitionSpec = {
-                                            (fadeIn(tween(190)) + scaleIn(initialScale = 0.90f, animationSpec = tween(190)))
-                                                .togetherWith(fadeOut(tween(140)))
+                                            val dir = if (lastCycleDirection >= 0) 1 else -1
+                                            (slideInHorizontally(
+                                                animationSpec = spring(
+                                                    dampingRatio = Spring.DampingRatioLowBouncy,
+                                                    stiffness = Spring.StiffnessMedium
+                                                ),
+                                                initialOffsetX = { fullW -> dir * (fullW / 2) }
+                                            ) + fadeIn(tween(200)) + scaleIn(initialScale = 0.84f, animationSpec = tween(220)))
+                                                .togetherWith(
+                                                    slideOutHorizontally(
+                                                        animationSpec = tween(180, easing = FastOutSlowInEasing),
+                                                        targetOffsetX = { fullW -> -dir * (fullW / 2) }
+                                                    ) + fadeOut(tween(150)) + scaleOut(targetScale = 0.86f, animationSpec = tween(160))
+                                                )
+                                                .using(SizeTransform(clip = false))
                                         },
                                         label = "HomeShowcaseAvatar"
                                     ) { shownChar ->
                                         Canvas(
                                             modifier = Modifier
                                                 .size(showcaseAvatarSize)
+                                                .graphicsLayer {
+                                                    translationY = floatBobPx
+                                                    scaleX = ultPreviewScale
+                                                    scaleY = ultPreviewScale
+                                                }
                                                 .clip(CircleShape)
                                                 .clickable { previewUltOnStage = !previewUltOnStage }
                                         ) {
+                                            val spinMultiplier = if (previewUltOnStage) 2.0f else 1.0f
                                             AnimeBallRenderer.drawPreviewAvatar(
                                                 scope = this,
                                                 character = shownChar,
-                                                weaponAngle = if (previewUltOnStage) 1.15f else 0.68f,
+                                                weaponAngle = (liveOrbitAngle * spinMultiplier) % (Math.PI * 2.0).toFloat(),
                                                 isUltimatePreview = previewUltOnStage
                                             )
                                         }
                                     }
 
                                     IconButton(
-                                        onClick = { onCycleCharacter(1) },
+                                        onClick = {
+                                            lastCycleDirection = 1
+                                            onCycleCharacter(1)
+                                        },
                                         modifier = Modifier
                                             .size(48.dp)
                                             .background(palette.cardSurface, CircleShape)
@@ -438,42 +561,62 @@ fun HomeHubScreen(
 
                                 Spacer(modifier = Modifier.height(6.dp))
 
-                                Text(
-                                    text = activeCharacter.name,
-                                    style = MaterialTheme.typography.displayMedium,
-                                    color = palette.stageOnSurface
-                                )
-                                Text(
-                                    text = "${activeCharacter.title} • ${activeCharacter.animeInspiration}",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = palette.stageMuted
-                                )
-                                Spacer(modifier = Modifier.height(5.dp))
-                                Surface(
-                                    color = palette.cardSurface.copy(alpha = 0.85f),
-                                    shape = RoundedCornerShape(50),
-                                    border = BorderStroke(1.dp, palette.border)
-                                ) {
-                                    Text(
-                                        text = "${activeCharacter.animeRace.simpleName} • ${activeCharacter.worldScaleTier.simpleName}",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = palette.blueAccent,
-                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp)
-                                    )
-                                }
-                                if (activeCharacter.hasStandSpirit) {
-                                    Spacer(modifier = Modifier.height(6.dp))
-                                    Surface(
-                                        color = palette.goldAccentSoft,
-                                        shape = RoundedCornerShape(50),
-                                        border = BorderStroke(1.dp, palette.goldAccent.copy(alpha = 0.45f))
-                                    ) {
+                                AnimatedContent(
+                                    targetState = activeCharacter,
+                                    transitionSpec = {
+                                        val dir = if (lastCycleDirection >= 0) 1 else -1
+                                        (slideInHorizontally(
+                                            animationSpec = tween(210, easing = FastOutSlowInEasing),
+                                            initialOffsetX = { w -> dir * (w / 5) }
+                                        ) + fadeIn(tween(190)))
+                                            .togetherWith(
+                                                slideOutHorizontally(
+                                                    animationSpec = tween(160, easing = FastOutSlowInEasing),
+                                                    targetOffsetX = { w -> -dir * (w / 5) }
+                                                ) + fadeOut(tween(130))
+                                            )
+                                    },
+                                    label = "HomeFighterIdentity"
+                                ) { charInfo ->
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                         Text(
-                                            text = "STAND: ${activeCharacter.joJoStandStyle.standName}",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = palette.goldAccent,
-                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp)
+                                            text = charInfo.name,
+                                            style = MaterialTheme.typography.displayMedium,
+                                            color = palette.stageOnSurface
                                         )
+                                        Text(
+                                            text = "${charInfo.title} • ${charInfo.animeInspiration}",
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = palette.stageMuted
+                                        )
+                                        Spacer(modifier = Modifier.height(5.dp))
+                                        Surface(
+                                            color = palette.cardSurface.copy(alpha = 0.85f),
+                                            shape = RoundedCornerShape(50),
+                                            border = BorderStroke(1.dp, palette.border)
+                                        ) {
+                                            Text(
+                                                text = "${charInfo.animeRace.simpleName} • ${charInfo.worldScaleTier.simpleName}",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = palette.blueAccent,
+                                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp)
+                                            )
+                                        }
+                                        if (charInfo.hasStandSpirit) {
+                                            Spacer(modifier = Modifier.height(6.dp))
+                                            Surface(
+                                                color = palette.goldAccentSoft,
+                                                shape = RoundedCornerShape(50),
+                                                border = BorderStroke(1.dp, palette.goldAccent.copy(alpha = 0.45f))
+                                            ) {
+                                                Text(
+                                                    text = "STAND: ${charInfo.joJoStandStyle.standName}",
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = palette.goldAccent,
+                                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp)
+                                                )
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -526,10 +669,10 @@ fun HomeHubScreen(
                         )
                         Spacer(modifier = Modifier.height(8.dp))
                         TraitLine(
-                            badge = "AUTO COUNTER",
+                            badge = "COUNTER",
                             badgeBg = palette.greenAccentSoft,
                             badgeFg = palette.greenAccent,
-                            title = "${activeCharacter.counterArchetype.simpleName} (${activeCharacter.autoCounterPercent}% Chance)",
+                            title = "${activeCharacter.counterArchetype.simpleName} (Random)",
                             desc = activeCharacter.simpleAutoCounterSummary
                         )
                         Spacer(modifier = Modifier.height(8.dp))
@@ -616,13 +759,25 @@ fun HomeHubScreen(
                             }
                         }
 
-                        Text(
-                            text = selectedMode.subtitle,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = palette.textSecondary
-                        )
+                        AnimatedContent(
+                            targetState = selectedMode,
+                            transitionSpec = {
+                                fadeIn(tween(180)).togetherWith(fadeOut(tween(120)))
+                            },
+                            label = "HomeModeSubtitle"
+                        ) { mode ->
+                            Text(
+                                text = mode.subtitle,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = palette.textSecondary
+                            )
+                        }
 
-                        if (selectedMode == GameMode.PRACTICE_BOT) {
+                        AnimatedVisibility(
+                            visible = selectedMode == GameMode.PRACTICE_BOT,
+                            enter = expandVertically(animationSpec = tween(220)) + fadeIn(tween(180)),
+                            exit = shrinkVertically(animationSpec = tween(180)) + fadeOut(tween(140))
+                        ) {
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 verticalAlignment = Alignment.CenterVertically,
@@ -688,6 +843,10 @@ fun HomeHubScreen(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .height(56.dp)
+                                .graphicsLayer {
+                                    scaleX = ctaPulse
+                                    scaleY = ctaPulse
+                                }
                                 .testTag("enter_arena_button")
                         ) {
                             Icon(Icons.Default.PlayArrow, contentDescription = null)

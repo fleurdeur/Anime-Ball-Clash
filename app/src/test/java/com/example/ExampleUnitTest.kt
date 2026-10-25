@@ -614,7 +614,7 @@ class ExampleUnitTest {
     }
 
     @Test
-    fun testUltimateModeUnlocksRapidMultiDash() {
+    fun testUltimateModeUnlocksRapidMultiDashAndStretchSpeed() {
         val fighter = CharacterRoster.getById("kakarot_z")
         val pBall = CombatBall(
             id = "player",
@@ -639,25 +639,44 @@ class ExampleUnitTest {
             onKnockout = {}
         )
         sim.configureArenaBounds(1000f, 1600f)
-        sim.startNonstopClash(Vector2(0.3f, -0.95f), BotDifficulty.EASY)
+        sim.startNonstopClash(Vector2(0.3f, -0.95f), BotDifficulty.EASY, stretchRatio = 0.85f)
 
-        // Normal dash cooldown is ~3.2s; Ultimate dash cooldown drops to 0.32s for Multi-Dash!
+        // 1. Dash speed scales with stretch ratio (short pull vs full stretch)
+        sim.playerRedirectCooldown = 0f
+        assertTrue(sim.redirectPlayerBall(Vector2(0f, -1f), stretchRatio = 0.20f))
+        val shortPullSpeed = pBall.velocity.length()
+
+        sim.playerRedirectCooldown = 0f
+        assertTrue(sim.redirectPlayerBall(Vector2(0f, -1f), stretchRatio = 1.0f))
+        val fullStretchSpeed = pBall.velocity.length()
+        assertTrue(
+            "Full stretch dash ($fullStretchSpeed) must be significantly faster than short pull ($shortPullSpeed)",
+            fullStretchSpeed > shortPullSpeed * 1.4f
+        )
+
+        // 2. Normal dash cooldown is >= 2.0s; Ultimate grants a random 3 to 5 Multi-Dash charges at 0.24s cooldown!
         val normalCd = pBall.effectiveRedirectCooldownSec
         assertTrue(normalCd >= 2.0f)
 
         pBall.ultimateGauge = 100f
         assertTrue(sim.triggerUltimate(pBall))
         assertTrue(pBall.isUltimateActive)
-        assertEquals(0.32f, pBall.effectiveRedirectCooldownSec, 0.01f)
+        val rolledCharges = pBall.multiDashChargesRemaining
+        assertTrue("Multi-dash charges must roll randomly between 3 and 5 (got $rolledCharges)", rolledCharges in 3..5)
+        assertEquals(0.24f, pBall.effectiveRedirectCooldownSec, 0.01f)
 
-        // Execute multiple rapid dashes while Ultimate is active
-        sim.playerRedirectCooldown = 0f
-        assertTrue(sim.redirectPlayerBall(Vector2(0.6f, -0.8f)))
-        assertEquals(0.32f, sim.playerRedirectCooldown, 0.02f)
-
-        repeat(22) { sim.update(0.016f) } // ~0.35s elapsed
-        assertTrue("Multi-dash should be ready again after ~0.35s in Ultimate mode", sim.playerRedirectCooldown <= 0f)
-        assertTrue(sim.redirectPlayerBall(Vector2(-0.6f, -0.8f)))
+        // Consume all rolled 3..5 Multi-Dash charges
+        for (i in 1..rolledCharges) {
+            sim.playerRedirectCooldown = 0f
+            assertTrue(sim.redirectPlayerBall(Vector2(0.6f, -0.8f), stretchRatio = 0.9f))
+            if (i < rolledCharges) {
+                assertEquals(0.24f, sim.playerRedirectCooldown, 0.02f)
+            } else {
+                // Final Multi-Dash charge spent -> returns to normal cooldown
+                assertEquals(0, pBall.multiDashChargesRemaining)
+                assertTrue("After spending 3..5 multi-dashes, cooldown returns to normal", sim.playerRedirectCooldown >= 2.0f)
+            }
+        }
     }
 
     @Test

@@ -108,6 +108,7 @@ data class CombatBall(
     var wallBounceCombo: Int = 0,
     var matchupBalance: LoreMatchupBalance = LoreMatchupBalance(),
     var ultVolleyTimer: Float = 0f,
+    var multiDashChargesRemaining: Int = 0,
     val trailPositions: ArrayDeque<Vector2> = ArrayDeque(12)
 ) {
     init {
@@ -131,7 +132,7 @@ data class CombatBall(
 
     val counterDurationSec: Float get() = 0.85f
     val counterCooldownSec: Float
-        get() = (2.8f - upgrades.cooldownLevel * 0.12f).coerceAtLeast(1.75f)
+        get() = 0.65f
     val isCounterActive: Boolean get() = counterActiveTimer > 0.01f
     val isCounterOnCooldown: Boolean get() = counterCooldownRemaining > 0.01f
     val canActivateCounter: Boolean
@@ -158,11 +159,12 @@ data class CombatBall(
 
     /**
      * Multi-Dash in Ultimate Form:
-     * Normal dash cooldown is ~3.0s; during Ultimate form it drops to 0.32s for rapid multi-dashes!
+     * Ultimate grants a random roll of 3 to 5 rapid Multi-Dash charges (0.24s cooldown).
+     * Once all Multi-Dash charges are used, dash returns to its normal cooldown (~3.0s).
      */
     val effectiveRedirectCooldownSec: Float
-        get() = if (isUltimateActive) {
-            0.32f
+        get() = if (isUltimateActive && multiDashChargesRemaining > 0) {
+            0.24f
         } else {
             (3.0f - upgrades.redirectCooldownReduction()).coerceAtLeast(1.65f)
         }

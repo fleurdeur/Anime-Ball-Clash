@@ -6,11 +6,18 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -35,7 +42,6 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.MusicOff
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -64,6 +70,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.withTransform
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.testTag
@@ -163,7 +170,8 @@ fun BattleArenaScreen(
                     engineSettings = engineSettings,
                     palette = palette,
                     onStepFrame = onStepFrame,
-                    onPlayerLaunch = onPlayerLaunch
+                    onPlayerLaunch = onPlayerLaunch,
+                    onDoubleTapUltimate = onTriggerUltimate
                 )
 
                 // Floating Dash / Multi-Dash Indicator Pill (top-start, never shifts layout)
@@ -206,9 +214,11 @@ fun BattleArenaScreen(
                         )
                         Text(
                             text = when {
-                                turnState == TurnState.AIM_OPENING -> "Aim Shot"
-                                hudState.isMultiDashActive && hudState.redirectReady -> "MULTI-DASH!"
-                                hudState.isMultiDashActive -> "Dash ${hudState.redirectHalfSecsLeft / 2f}s"
+                                turnState == TurnState.AIM_OPENING -> "Stretch to Aim"
+                                hudState.isMultiDashActive && hudState.redirectReady ->
+                                    "MULTI-DASH x${hudState.multiDashCharges}!"
+                                hudState.isMultiDashActive ->
+                                    "Dash x${hudState.multiDashCharges} (${hudState.redirectHalfSecsLeft / 2f}s)"
                                 hudState.redirectReady -> "Dash Ready"
                                 else -> "Dash ${hudState.redirectHalfSecsLeft / 2f}s"
                             },
@@ -259,7 +269,7 @@ fun BattleArenaScreen(
                             border = BorderStroke(1.dp, palette.border)
                         ) {
                             Text(
-                                text = "Drag anywhere to aim & shoot • Counters trigger automatically!",
+                                text = "Pull further for faster dash • Double-tap for Ultimate!",
                                 style = MaterialTheme.typography.labelMedium,
                                 color = palette.textPrimary,
                                 maxLines = 1,
@@ -594,7 +604,8 @@ private fun ArenaCourtCanvas(
     engineSettings: EngineSettings,
     palette: AppPalette,
     onStepFrame: (Float) -> Unit,
-    onPlayerLaunch: (Vector2, Float) -> Unit
+    onPlayerLaunch: (Vector2, Float) -> Unit,
+    onDoubleTapUltimate: () -> Unit
 ) {
     var frameTick by remember { mutableIntStateOf(0) }
     var dragStart by remember { mutableStateOf<Offset?>(null) }
@@ -603,6 +614,7 @@ private fun ArenaCourtCanvas(
     val currentTurnState by rememberUpdatedState(turnState)
     val currentOnLaunch by rememberUpdatedState(onPlayerLaunch)
     val currentOnStep by rememberUpdatedState(onStepFrame)
+    val currentOnDoubleTapUlt by rememberUpdatedState(onDoubleTapUltimate)
     val textMeasurer = rememberTextMeasurer()
 
     LaunchedEffect(simulation, engineSettings.targetFps) {
@@ -633,7 +645,16 @@ private fun ArenaCourtCanvas(
             .onSizeChanged { sz ->
                 simulation.configureArenaBounds(sz.width.toFloat(), sz.height.toFloat())
             }
-            .pointerInput(simulation) {
+            .pointerInput(simulation, "double_tap_ultimate") {
+                detectTapGestures(
+                    onDoubleTap = {
+                        if (currentTurnState != TurnState.KNOCKOUT_SLOWMO) {
+                            currentOnDoubleTapUlt()
+                        }
+                    }
+                )
+            }
+            .pointerInput(simulation, "slingshot_drag") {
                 detectDragGestures(
                     onDragStart = { offset ->
                         if (currentTurnState != TurnState.KNOCKOUT_SLOWMO) {
@@ -827,19 +848,20 @@ private fun ArenaCompactBottomBar(
         else -> (hudState.playerUltPercent / 100f).coerceIn(0f, 1f)
     }
 
-    val isCounterOnCd = hudState.playerCounterCooldownHalfSecs > 0
-    val isAutoTriggered = hudState.isAutoCounterShielded || hudState.isPlayerCounterActive
-    val counterReady = !isAutoTriggered && !isCounterOnCd
-    val counterProgress = when {
-        isAutoTriggered -> 1f
-        isCounterOnCd ->
-            1f - ((hudState.playerCounterCooldownHalfSecs / 2f) / hudState.playerCounterMaxCooldownSec.coerceAtLeast(1f)).coerceIn(0f, 1f)
-        else -> 1f
-    }
+    val pulseTransition = rememberInfiniteTransition(label = "ult_ready_pulse")
+    val readyScale by pulseTransition.animateFloat(
+        initialValue = 1.0f,
+        targetValue = 1.025f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 520, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "readyScale"
+    )
 
     Row(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         // Sound toggle (48dp touch target)
@@ -864,107 +886,29 @@ private fun ArenaCompactBottomBar(
             }
         }
 
-        // Music toggle (48dp touch target — shown directly on >=385dp screens, and always in Settings)
-        if (!isCompactWidth) {
-            Surface(
-                color = palette.cardSurface,
-                shape = RoundedCornerShape(12.dp),
-                border = BorderStroke(1.dp, palette.border),
-                modifier = Modifier.size(48.dp)
-            ) {
-                IconButton(
-                    onClick = onToggleMusic,
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .testTag("arena_music_toggle_button")
-                ) {
-                    Icon(
-                        imageVector = if (musicEnabled) Icons.Default.MusicNote else Icons.Default.MusicOff,
-                        contentDescription = if (musicEnabled) "Mute Fight Music" else "Play Fight Music",
-                        tint = if (musicEnabled) palette.goldAccent else palette.textMuted,
-                        modifier = Modifier.size(19.dp)
-                    )
-                }
-            }
-        }
-
-        // Automatic Chance-Based Counter Status Badge (48dp height, no manual mashing needed)
+        // Music toggle (48dp touch target)
         Surface(
+            color = palette.cardSurface,
             shape = RoundedCornerShape(12.dp),
-            color = when {
-                isAutoTriggered -> palette.greenAccentSoft
-                counterReady -> palette.blueAccentSoft
-                else -> palette.cardSurface
-            },
-            border = BorderStroke(
-                1.dp,
-                when {
-                    isAutoTriggered -> palette.greenAccent
-                    counterReady -> palette.blueAccent
-                    else -> palette.border
-                }
-            ),
-            modifier = Modifier
-                .weight(0.95f)
-                .height(48.dp)
-                .testTag("auto_counter_status_card")
+            border = BorderStroke(1.dp, palette.border),
+            modifier = Modifier.size(48.dp)
         ) {
-            Column(
+            IconButton(
+                onClick = onToggleMusic,
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(horizontal = 8.dp, vertical = 6.dp),
-                verticalArrangement = Arrangement.SpaceBetween
+                    .testTag("arena_music_toggle_button")
             ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.Center,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Icon(
-                        Icons.Default.Shield,
-                        contentDescription = "Auto Counter Status",
-                        tint = when {
-                            isAutoTriggered -> palette.greenAccent
-                            counterReady -> palette.blueAccent
-                            else -> palette.textMuted
-                        },
-                        modifier = Modifier.size(14.dp)
-                    )
-                    Spacer(modifier = Modifier.width(3.dp))
-                    Text(
-                        text = when {
-                            isAutoTriggered -> "AUTO COUNTER!"
-                            isCounterOnCd -> "Ready in ${hudState.playerCounterCooldownHalfSecs / 2f}s"
-                            else -> "Auto ${hudState.counterLabel} ${hudState.autoCounterPercent}%"
-                        },
-                        style = MaterialTheme.typography.labelMedium,
-                        color = when {
-                            isAutoTriggered -> palette.greenAccent
-                            counterReady -> palette.blueAccent
-                            else -> palette.textSecondary
-                        },
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-
-                LinearProgressIndicator(
-                    progress = { counterProgress },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(4.dp)
-                        .clip(RoundedCornerShape(50)),
-                    color = when {
-                        isAutoTriggered -> palette.greenAccent
-                        counterReady -> palette.blueAccent
-                        else -> palette.textMuted
-                    },
-                    trackColor = palette.elevatedSurface
+                Icon(
+                    imageVector = if (musicEnabled) Icons.Default.MusicNote else Icons.Default.MusicOff,
+                    contentDescription = if (musicEnabled) "Mute Fight Music" else "Play Fight Music",
+                    tint = if (musicEnabled) palette.goldAccent else palette.textMuted,
+                    modifier = Modifier.size(19.dp)
                 )
             }
         }
 
-        // Compact Ultimate Button (48dp height)
+        // Full-width Ultimate Button (48dp height — Counter bar removed; double-tapping court also fires Ultimate!)
         Surface(
             onClick = { if (ultReady) onTriggerUltimate() },
             enabled = ultReady,
@@ -983,14 +927,19 @@ private fun ArenaCompactBottomBar(
                 }
             ),
             modifier = Modifier
-                .weight(1.1f)
+                .weight(1f)
                 .height(48.dp)
+                .graphicsLayer {
+                    val s = if (ultReady) readyScale else 1f
+                    scaleX = s
+                    scaleY = s
+                }
                 .testTag("ultimate_awaken_button")
         ) {
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(horizontal = 8.dp, vertical = 6.dp),
+                    .padding(horizontal = 10.dp, vertical = 6.dp),
                 verticalArrangement = Arrangement.SpaceBetween
             ) {
                 Row(
@@ -1007,15 +956,21 @@ private fun ArenaCompactBottomBar(
                             isPlayerUltOnCd -> palette.textMuted
                             else -> palette.goldAccent
                         },
-                        modifier = Modifier.size(14.dp)
+                        modifier = Modifier.size(15.dp)
                     )
-                    Spacer(modifier = Modifier.width(3.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
                     Text(
                         text = when {
-                            hudState.isPlayerUltActive -> "ULT ${hudState.playerUltActiveHalfSecs / 2f}s"
-                            isPlayerUltOnCd -> "Wait ${hudState.playerUltCooldownHalfSecs / 2f}s"
-                            ultReady -> "ULT: $ultimateName"
-                            else -> "Ult ${hudState.playerUltPercent}%"
+                            hudState.isPlayerUltActive && hudState.multiDashCharges > 0 ->
+                                "ULT ${hudState.playerUltActiveHalfSecs / 2f}s • ${hudState.multiDashCharges}x DASH"
+                            hudState.isPlayerUltActive ->
+                                "ULT ${hudState.playerUltActiveHalfSecs / 2f}s"
+                            isPlayerUltOnCd ->
+                                "Wait ${hudState.playerUltCooldownHalfSecs / 2f}s"
+                            ultReady ->
+                                if (isCompactWidth) "ULT: $ultimateName (2x Tap!)" else "ULT: $ultimateName • Tap or 2x Tap!"
+                            else ->
+                                "Ult ${hudState.playerUltPercent}% (2x Tap Ready)"
                         },
                         style = MaterialTheme.typography.labelMedium,
                         color = when {

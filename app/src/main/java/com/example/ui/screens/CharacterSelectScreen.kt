@@ -1,6 +1,16 @@
 package com.example.ui.screens
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -61,6 +71,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontStyle
@@ -101,6 +112,26 @@ fun CharacterSelectScreen(
     var selectedTier by remember { mutableStateOf<AnimeTier?>(null) }
     var selectedRole by remember { mutableStateOf<CharacterClass?>(null) }
     var inspectedCharacter by remember { mutableStateOf<CharacterData?>(null) }
+
+    val rosterMotion = rememberInfiniteTransition(label = "roster_preview_motion")
+    val liveWeaponAngle by rosterMotion.animateFloat(
+        initialValue = 0f,
+        targetValue = 6.2831855f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 4800, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "roster_weapon_angle"
+    )
+    val modalFloatPx by rosterMotion.animateFloat(
+        initialValue = -4f,
+        targetValue = 4f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1600),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "modal_avatar_float"
+    )
 
     BackHandler {
         if (inspectedCharacter != null) {
@@ -275,6 +306,7 @@ fun CharacterSelectScreen(
                             upgradeTotal = upg.totalUpgrades,
                             isUnlocked = isUnlocked,
                             isEquipped = isEquipped,
+                            liveWeaponAngle = if (isEquipped) liveWeaponAngle else 0.65f,
                             onClick = {
                                 if (isUnlocked) {
                                     onSelectCharacter(character.id)
@@ -325,11 +357,15 @@ fun CharacterSelectScreen(
                             .background(palette.stageSurface),
                         contentAlignment = Alignment.Center
                     ) {
-                        Canvas(modifier = Modifier.size(84.dp)) {
+                        Canvas(
+                            modifier = Modifier
+                                .size(84.dp)
+                                .graphicsLayer { translationY = modalFloatPx }
+                        ) {
                             AnimeBallRenderer.drawPreviewAvatar(
                                 scope = this,
                                 character = char,
-                                weaponAngle = if (previewAwakened) 1.2f else 0.7f,
+                                weaponAngle = if (previewAwakened) liveWeaponAngle * 1.6f else liveWeaponAngle,
                                 isUltimatePreview = previewAwakened
                             )
                         }
@@ -450,7 +486,7 @@ fun CharacterSelectScreen(
 
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text(
-                        text = "Auto Counter • ${char.counterArchetype.simpleName} (${char.autoCounterPercent}% Chance)",
+                        text = "Counter • ${char.counterArchetype.simpleName} (Random)",
                         style = MaterialTheme.typography.titleMedium,
                         color = palette.greenAccent
                     )
@@ -714,15 +750,29 @@ private fun FighterGridTile(
     upgradeTotal: Int,
     isUnlocked: Boolean,
     isEquipped: Boolean,
+    liveWeaponAngle: Float,
     onClick: () -> Unit
 ) {
     val palette = AppTheme.palette
     val isVillain = character.alignment == CharacterAlignment.ANTAGONIST
-    val borderColor = when {
+    val targetBorderColor = when {
         isEquipped -> palette.primaryAccent
         isUnlocked -> palette.border
         else -> palette.border.copy(alpha = 0.6f)
     }
+    val borderColor by animateColorAsState(
+        targetValue = targetBorderColor,
+        animationSpec = tween(durationMillis = 200),
+        label = "tile_border_${character.id}"
+    )
+    val tileScale by animateFloatAsState(
+        targetValue = if (isEquipped) 1.025f else 1f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessMediumLow
+        ),
+        label = "tile_scale_${character.id}"
+    )
     val borderWidth = if (isEquipped) 1.8.dp else 1.dp
 
     Surface(
@@ -732,6 +782,10 @@ private fun FighterGridTile(
         border = BorderStroke(borderWidth, borderColor),
         modifier = Modifier
             .fillMaxWidth()
+            .graphicsLayer {
+                scaleX = tileScale
+                scaleY = tileScale
+            }
             .testTag("fighter_card_${character.id}")
     ) {
         Column(
@@ -749,7 +803,7 @@ private fun FighterGridTile(
                     AnimeBallRenderer.drawPreviewAvatar(
                         scope = this,
                         character = character,
-                        weaponAngle = 0.65f
+                        weaponAngle = liveWeaponAngle
                     )
                 }
                 if (upgradeTotal > 0) {
